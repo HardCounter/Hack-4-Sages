@@ -41,7 +41,8 @@ def generate_eyeball_map(
     """Analytical surface-temperature map.
 
     For a tidally locked planet the map has an *eyeball* topology:
-    a warm substellar region centred at (0, π) surrounded by ice.
+    a warm substellar region centred at (0, 0) surrounded by ice.
+    LON=0 maps to the +X axis in the 3-D globe, i.e. towards the star.
     For a fast rotator a simple latitudinal gradient is used.
     """
     lat = np.linspace(-np.pi / 2, np.pi / 2, n_lat)
@@ -49,7 +50,7 @@ def generate_eyeball_map(
     LAT, LON = np.meshgrid(lat, lon, indexing="ij")
 
     if tidally_locked:
-        cos_zenith = np.cos(LAT) * np.cos(LON - np.pi)
+        cos_zenith = np.cos(LAT) * np.cos(LON)
         cos_zenith = np.clip(cos_zenith, 0, 1)
         T_sub = T_eq * 1.4
         T_night = max(T_eq * 0.3, 40)

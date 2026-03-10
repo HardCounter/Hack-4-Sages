@@ -1,12 +1,12 @@
 streamlit==1.41.0
 pandas==2.2.3
-numpy==1.26.4
+numpy>=2.1.0
 plotly==5.24.1
 requests==2.32.3
 pydantic==2.10.3
 scikit-learn==1.6.0
 scikit-elm==0.21a0
-ctgan==0.10.2
+ctgan==0.12.1
 langchain==0.3.13
 langchain-ollama==0.2.3
 langchain-core>=0.3.0
