@@ -65,6 +65,33 @@ class PureELM:
     def predict(self, X: np.ndarray) -> np.ndarray:
         return self._hidden(X) @ self.beta
 
+    # ── Incremental (batched) training ────────────────────────────────────
+
+    def fit_incremental_init(self, n_features: int) -> None:
+        """Initialize random weights for batched training."""
+        self.W_in = np.random.randn(n_features, self.n_neurons).astype(np.float32) * 0.5
+        self.bias = np.random.randn(1, self.n_neurons).astype(np.float32) * 0.5
+        self._HtH = np.zeros((self.n_neurons, self.n_neurons), dtype=np.float64)
+        self._HtT: Optional[np.ndarray] = None
+
+    def fit_incremental_accumulate(self, X: np.ndarray, T: np.ndarray) -> None:
+        """Accumulate H^T H and H^T T from one batch (additive normal eqn)."""
+        H = self._hidden(X).astype(np.float64)
+        self._HtH += H.T @ H
+        HtT_batch = H.T @ T.astype(np.float64)
+        if self._HtT is None:
+            self._HtT = HtT_batch
+        else:
+            self._HtT += HtT_batch
+
+    def fit_incremental_solve(self) -> None:
+        """Solve for output weights from accumulated statistics."""
+        I = np.eye(self.n_neurons)
+        self.beta = np.linalg.solve(
+            self._HtH + I / self.C, self._HtT  # type: ignore[arg-type]
+        ).astype(np.float32)
+        del self._HtH, self._HtT
+
 
 class ELMEnsemble:
     """Ensemble of K independent PureELMs – variance reduction via averaging."""
@@ -144,6 +171,70 @@ class ELMClimateSurrogate:
             m = self._create_model()
             m.fit(X_s, y_s)
             self.models.append(m)
+
+    def train_batched(
+        self,
+        n_samples: int,
+        chunk_size: int = 50_000,
+        seed: int = 42,
+        log_every: int = 1,
+    ) -> None:
+        """Memory-efficient training via incremental H^TH accumulation.
+
+        Generates data in chunks so peak memory stays at *chunk_size*
+        rows regardless of *n_samples*.  Two passes over the data:
+
+        1. ``partial_fit`` both scalers.
+        2. For every chunk, scale → compute hidden → accumulate per model.
+        """
+        from sklearn.preprocessing import StandardScaler
+
+        self.scaler_X = StandardScaler()
+        self.scaler_y = StandardScaler()
+        n_chunks = (n_samples + chunk_size - 1) // chunk_size
+
+        # Pass 1 — fit scalers incrementally
+        print(f"  Pass 1/{2}: fitting scalers ({n_chunks} chunks)…")
+        for idx, (X_c, y_c) in enumerate(
+            generate_training_data_chunks(
+                n_samples, chunk_size=chunk_size, seed=seed,
+                n_lat=self.N_LAT, n_lon=self.N_LON,
+            )
+        ):
+            self.scaler_X.partial_fit(X_c)
+            self.scaler_y.partial_fit(y_c)
+            if (idx + 1) % log_every == 0:
+                print(f"    chunk {idx + 1}/{n_chunks}")
+
+        # Initialise all ensemble models (always PureELM for batched path)
+        self.models = []
+        for _ in range(self.n_ensemble):
+            m = PureELM(
+                n_neurons=self.n_neurons,
+                C=1.0 / max(self.alpha, 1e-12),
+            )
+            m.fit_incremental_init(n_features=8)
+            self.models.append(m)
+
+        # Pass 2 — accumulate H^TH / H^TT
+        print(f"  Pass 2/{2}: accumulating ({n_chunks} chunks)…")
+        for idx, (X_c, y_c) in enumerate(
+            generate_training_data_chunks(
+                n_samples, chunk_size=chunk_size, seed=seed,
+                n_lat=self.N_LAT, n_lon=self.N_LON,
+            )
+        ):
+            X_s = self.scaler_X.transform(X_c)
+            y_s = self.scaler_y.transform(y_c)
+            for m in self.models:
+                m.fit_incremental_accumulate(X_s, y_s)
+            if (idx + 1) % log_every == 0:
+                print(f"    chunk {idx + 1}/{n_chunks}")
+
+        # Solve all models
+        for m in self.models:
+            m.fit_incremental_solve()
+        self._use_skelm = False
 
     def predict(self, X: np.ndarray) -> np.ndarray:
         X_s = self.scaler_X.transform(X)
@@ -253,10 +344,11 @@ def generate_analytical_training_data(
     lon = np.linspace(0, 2 * np.pi, n_lon)
     LAT, LON = np.meshgrid(lat, lon, indexing="ij")
 
-    X_features: List[list] = []
-    y_maps: List[np.ndarray] = []
+    n_pix = n_lat * n_lon
+    X_features = np.empty((n_samples, 8), dtype=np.float32)
+    y_maps = np.empty((n_samples, n_pix), dtype=np.float32)
 
-    for _ in range(n_samples):
+    for i in range(n_samples):
         star_teff = np.random.uniform(2500, 7000)
         star_radius = np.random.uniform(0.1, 2.0)
         semi_major = np.random.uniform(0.01, 2.0)
@@ -280,11 +372,73 @@ def generate_analytical_training_data(
             temp_map = T_eq * (1 + 0.15 * np.cos(LAT))
             temp_map += np.random.normal(0, T_eq * 0.02, temp_map.shape)
 
-        features = [
+        X_features[i] = [
             radius_earth, mass_earth, semi_major, star_teff,
             star_radius, insol, albedo, locked,
         ]
-        X_features.append(features)
-        y_maps.append(temp_map.flatten())
+        y_maps[i] = temp_map.flatten()
 
-    return np.array(X_features), np.array(y_maps)
+    return X_features, y_maps
+
+
+def _generate_one_sample(rng, LAT, LON):
+    """Generate a single (features, temp_map) pair using *rng*."""
+    star_teff = rng.uniform(2500, 7000)
+    star_radius = rng.uniform(0.1, 2.0)
+    semi_major = rng.uniform(0.01, 2.0)
+    albedo = rng.uniform(0.05, 0.7)
+    radius_earth = rng.uniform(0.5, 2.5)
+    mass_earth = radius_earth ** (1 / 0.27)
+    insol = (star_teff / 5778) ** 4 * star_radius ** 2 / semi_major ** 2
+    locked = int(rng.choice([0, 1], p=[0.3, 0.7]))
+
+    R_star_m = star_radius * 6.957e8
+    a_m = semi_major * 1.496e11
+    T_eq = star_teff * np.sqrt(R_star_m / (2 * a_m)) * (1 - albedo) ** 0.25
+
+    if locked:
+        cos_z = np.cos(LAT) * np.cos(LON - np.pi)
+        cos_z = np.clip(cos_z, 0, 1)
+        T_max = T_eq * 1.4
+        T_min = max(T_eq * 0.3, 40)
+        temp_map = T_min + (T_max - T_min) * cos_z ** 0.25
+    else:
+        temp_map = T_eq * (1 + 0.15 * np.cos(LAT))
+        temp_map += rng.normal(0, T_eq * 0.02, temp_map.shape)
+
+    features = [
+        radius_earth, mass_earth, semi_major, star_teff,
+        star_radius, insol, albedo, locked,
+    ]
+    return features, temp_map.flatten()
+
+
+def generate_training_data_chunks(
+    n_samples: int,
+    chunk_size: int = 50_000,
+    n_lat: int = 32,
+    n_lon: int = 64,
+    seed: int = 42,
+):
+    """Yield ``(X_chunk, y_chunk)`` pairs for memory-efficient training.
+
+    Uses a seeded RNG so two iterations with the same *seed* produce
+    identical data (needed for the two-pass scaler → accumulate flow).
+    """
+    rng = np.random.RandomState(seed)
+    lat = np.linspace(-np.pi / 2, np.pi / 2, n_lat)
+    lon = np.linspace(0, 2 * np.pi, n_lon)
+    LAT, LON = np.meshgrid(lat, lon, indexing="ij")
+    n_pix = n_lat * n_lon
+
+    generated = 0
+    while generated < n_samples:
+        batch = min(chunk_size, n_samples - generated)
+        X = np.empty((batch, 8), dtype=np.float32)
+        y = np.empty((batch, n_pix), dtype=np.float32)
+        for i in range(batch):
+            feats, tmap = _generate_one_sample(rng, LAT, LON)
+            X[i] = feats
+            y[i] = tmap
+        yield X, y
+        generated += batch

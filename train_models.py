@@ -33,6 +33,9 @@ def ensure_dir():
 
 # ── 1. ELM ensemble ──────────────────────────────────────────────────────────
 
+BATCH_THRESHOLD = 100_000
+
+
 def train_elm(n_samples: int = 5000, n_ensemble: int = 10, n_neurons: int = 500):
     from modules.elm_surrogate import ELMClimateSurrogate, generate_analytical_training_data
 
@@ -42,16 +45,24 @@ def train_elm(n_samples: int = 5000, n_ensemble: int = 10, n_neurons: int = 500)
     print(f"  Samples : {n_samples}")
     print(f"  Ensemble: {n_ensemble} models x {n_neurons} neurons")
 
-    t0 = time.time()
-    X, y = generate_analytical_training_data(n_samples=n_samples)
-    print(f"  Data generated in {time.time()-t0:.1f}s  (X={X.shape}, y={y.shape})")
-
     model = ELMClimateSurrogate(
         n_ensemble=n_ensemble, n_neurons=n_neurons, alpha=1e-4
     )
-    t1 = time.time()
-    model.train(X, y)
-    print(f"  Training completed in {time.time()-t1:.1f}s")
+
+    if n_samples >= BATCH_THRESHOLD:
+        chunk_size = min(50_000, n_samples // 4)
+        print(f"  Mode    : batched (chunk_size={chunk_size})")
+        t0 = time.time()
+        model.train_batched(n_samples=n_samples, chunk_size=chunk_size)
+        print(f"  Training completed in {time.time()-t0:.1f}s")
+    else:
+        t0 = time.time()
+        X, y = generate_analytical_training_data(n_samples=n_samples)
+        print(f"  Data generated in {time.time()-t0:.1f}s  (X={X.shape}, y={y.shape})")
+
+        t1 = time.time()
+        model.train(X, y)
+        print(f"  Training completed in {time.time()-t1:.1f}s")
 
     path = os.path.join(MODELS_DIR, "elm_ensemble.pkl")
     model.save(path)
@@ -158,6 +169,14 @@ def main():
         help="Number of synthetic training samples for ELM (default: 5000)"
     )
     parser.add_argument(
+        "--elm-neurons", type=int, default=500,
+        help="Hidden neurons per ELM model (default: 500)"
+    )
+    parser.add_argument(
+        "--elm-models", type=int, default=10,
+        help="Number of ELM models in the ensemble (default: 10)"
+    )
+    parser.add_argument(
         "--ctgan-epochs", type=int, default=300,
         help="CTGAN training epochs (default: 300)"
     )
@@ -170,7 +189,11 @@ def main():
     ensure_dir()
 
     # ELM always runs — it's fast and essential
-    train_elm(n_samples=args.elm_samples)
+    train_elm(
+        n_samples=args.elm_samples,
+        n_ensemble=args.elm_models,
+        n_neurons=args.elm_neurons,
+    )
 
     if args.ctgan:
         train_ctgan(epochs=args.ctgan_epochs)
