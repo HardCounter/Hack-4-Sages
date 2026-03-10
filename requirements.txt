@@ -1,0 +1,17 @@
+streamlit==1.41.0
+pandas==2.2.3
+numpy==1.26.4
+plotly==5.24.1
+requests==2.32.3
+pydantic==2.10.3
+scikit-learn==1.6.0
+scikit-elm==0.21a0
+ctgan==0.10.2
+langchain==0.3.13
+langchain-ollama==0.2.3
+ollama==0.4.4
+scipy==1.14.1
+netCDF4==1.7.2
+deepxde==1.12.0
+kaleido==0.2.1
+imageio==2.36.1
