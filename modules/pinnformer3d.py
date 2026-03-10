@@ -15,7 +15,6 @@ import numpy as np
 try:
     import torch
     import torch.nn as nn
-    from torch.nn.attention import SDPBackend, sdpa_kernel
 
     _HAS_TORCH = True
 except ImportError:
@@ -89,11 +88,7 @@ if _HAS_TORCH:
         PDE residual: κ ∇²T + S(θ,φ) − σ T⁴ = 0
         """
         x_colloc = x_colloc.requires_grad_(True)
-
-        # Force math-based scaled dot-product attention so that
-        # second-order autograd (used for the Laplacian) is implemented.
-        with sdpa_kernel(SDPBackend.MATH):
-            T_pred = model(x_colloc)
+        T_pred = model(x_colloc)
 
         grad_T = torch.autograd.grad(
             T_pred.sum(), x_colloc, create_graph=True
@@ -112,8 +107,7 @@ if _HAS_TORCH:
         residual = KAPPA * laplacian + S - SIGMA * T_pred.squeeze() ** 4
         L_pde = torch.mean(residual**2)
 
-        with sdpa_kernel(SDPBackend.MATH):
-            T_bc_pred = model(x_bc)
+        T_bc_pred = model(x_bc)
         L_bc = torch.mean((T_bc_pred.squeeze() - T_bc) ** 2)
 
         return L_bc + lambda_pde * L_pde
@@ -184,41 +178,8 @@ if _HAS_TORCH:
     ) -> PINNFormer3D:
         model = PINNFormer3D()
         model.load_state_dict(torch.load(path, map_location=device))
-        model.to(device)
         model.eval()
         return model
-
-    def sample_surface_map(
-        model: PINNFormer3D,
-        n_lat: int = 32,
-        n_lon: int = 64,
-        z_level: float = 0.0,
-        device: str = "cpu",
-        target_T_eq: float | None = None,
-    ) -> np.ndarray:
-        """Sample a 2-D surface temperature map from a trained PINNFormer3D.
-
-        Generates a regular grid in (θ, φ) at fixed *z_level* and evaluates
-        the network, optionally rescaling the map so that its mean matches
-        *target_T_eq*.
-        """
-        lat = np.linspace(-np.pi / 2, np.pi / 2, n_lat)
-        lon = np.linspace(0, 2 * np.pi, n_lon)
-        LAT, LON = np.meshgrid(lat, lon, indexing="ij")
-        Z = np.full_like(LAT, z_level)
-
-        coords = np.stack([LAT, LON, Z], axis=-1).astype(np.float32).reshape(-1, 3)
-
-        with torch.no_grad(), sdpa_kernel(SDPBackend.MATH):
-            x = torch.from_numpy(coords).to(device)
-            T = model(x).squeeze(-1).detach().cpu().numpy().reshape(n_lat, n_lon)
-
-        if target_T_eq is not None:
-            base_mean = float(T.mean())
-            if base_mean > 0:
-                T = T * (target_T_eq / base_mean)
-
-        return T
 
 
 # ── Fallback stub when torch is missing ───────────────────────────────────────

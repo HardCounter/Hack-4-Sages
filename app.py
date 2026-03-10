@@ -17,7 +17,7 @@ import time
 import numpy as np
 import pandas as pd
 import plotly.graph_objects as go
-import streamlit as st
+import  streamlit as st
 
 # ─── Page config (must be first Streamlit call) ──────────────────────────────
 
@@ -87,29 +87,6 @@ def _load_elm():
     except FileNotFoundError:
         pass
     return m
-
-
-@st.cache_resource
-def _load_pinn():
-    """Load trained PINNFormer3D weights if available.
-
-    Returns a tuple (model, device) or None if unavailable.
-    """
-    try:
-        import torch
-        from modules.pinnformer3d import load_pinnformer
-    except Exception:
-        return None
-
-    path = "models/pinn3d_weights.pt"
-    try:
-        device = "cuda" if torch.cuda.is_available() else "cpu"
-        model = load_pinnformer(path, device=device)
-        return model, device
-    except FileNotFoundError:
-        return None
-    except Exception:
-        return None
 
 
 # ─── Session-state defaults ──────────────────────────────────────────────────
@@ -265,10 +242,6 @@ with tab_manual:
         )
         albedo = st.slider("Bond albedo", 0.0, 1.0, 0.3, 0.01)
         locked = st.checkbox("Tidally locked", True)
-        use_pinn = st.checkbox(
-            "Use 3D PINNFormer (experimental, slower; tidally locked only)",
-            value=False,
-        )
 
         run_sim = st.button(
             "\U0001f680 Run Simulation", type="primary", use_container_width=True
@@ -317,12 +290,7 @@ with tab_manual:
 
                 SimulationOutput(T_eq_K=T_eq, ESI=esi, flux_earth=S_norm)
 
-                _pipeline.write(
-                    "\U0001f30d Generating climate map "
-                    "(PINNFormer 3-D / ELM / analytical)\u2026"
-                    if (use_pinn and locked)
-                    else "\U0001f30d Generating climate map (ELM / analytical)\u2026"
-                )
+                _pipeline.write("\U0001f30d Generating climate map (ELM / analytical)\u2026")
                 gd = GracefulDegradation()
 
                 def _elm_predict():
@@ -344,44 +312,10 @@ with tab_manual:
                 def _analytical_fallback():
                     return generate_eyeball_map(T_eq, tidally_locked=locked)
 
-                def _elm_or_analytical():
-                    return gd.run_with_fallback(
-                        _elm_predict,
-                        _analytical_fallback,
-                        timeout=5.0,
-                        label="ELM Surrogate",
-                    )
-
-                if use_pinn and locked:
-                    from modules.pinnformer3d import sample_surface_map
-
-                    def _pinn_surface():
-                        bundle = _load_pinn()
-                        if bundle is None:
-                            raise FileNotFoundError("PINNFormer model not available")
-                        model_pinn, device_pinn = bundle
-                        return sample_surface_map(
-                            model_pinn,
-                            n_lat=32,
-                            n_lon=64,
-                            z_level=0.0,
-                            device=device_pinn,
-                            target_T_eq=T_eq,
-                        )
-
-                    temp_map = gd.run_with_fallback(
-                        _pinn_surface,
-                        _elm_or_analytical,
-                        timeout=10.0,
-                        label="PINNFormer 3-D",
-                    )
-                else:
-                    temp_map = gd.run_with_fallback(
-                        _elm_predict,
-                        _analytical_fallback,
-                        timeout=5.0,
-                        label="ELM Surrogate",
-                    )
+                temp_map = gd.run_with_fallback(
+                    _elm_predict, _analytical_fallback,
+                    timeout=5.0, label="ELM Surrogate",
+                )
                 if not gd.validate_temperature_map(temp_map):
                     temp_map = _analytical_fallback()
 
@@ -459,11 +393,13 @@ with tab_manual:
 
             # SEPHI traffic lights
             sp = d["SEPHI"]
+            _ok = "\u2705"
+            _fail = "\u274c"
             st.markdown(
                 f"**SEPHI** &nbsp; "
-                f"{'\\u2705' if sp['thermal_ok'] else '\\u274c'} Thermal &nbsp; "
-                f"{'\\u2705' if sp['atmosphere_ok'] else '\\u274c'} Atmosphere &nbsp; "
-                f"{'\\u2705' if sp['magnetic_ok'] else '\\u274c'} Magnetic &nbsp; "
+                f"{_ok if sp['thermal_ok'] else _fail} Thermal &nbsp; "
+                f"{_ok if sp['atmosphere_ok'] else _fail} Atmosphere &nbsp; "
+                f"{_ok if sp['magnetic_ok'] else _fail} Magnetic &nbsp; "
                 f"(Score: **{sp['sephi_score']:.2f}**)"
             )
 
@@ -748,11 +684,13 @@ with tab_science:
                 ic1, ic2 = st.columns(2)
                 ic1.metric("ISA Score", f"{isa['isa_score']:.2f}")
                 ic2.metric("Outgassing", f"{isa['outgassing']['outgassing_rate_earth']:.2f}x Earth")
+                _ok = "\u2705"
+                _fail = "\u274c"
                 st.markdown(
-                    f"{'\\u2705' if isa['plate_tectonics_likely'] else '\\u274c'} Plate tectonics &nbsp; "
-                    f"{'\\u2705' if isa['carbonate_silicate_cycle'] else '\\u274c'} C-Si cycle &nbsp; "
-                    f"{'\\u2705' if isa['water_cycling'] else '\\u274c'} Water cycling &nbsp; "
-                    f"{'\\u2705' if isa['volatile_retention'] else '\\u274c'} Volatile retention"
+                    f"{_ok if isa['plate_tectonics_likely'] else _fail} Plate tectonics &nbsp; "
+                    f"{_ok if isa['carbonate_silicate_cycle'] else _fail} C-Si cycle &nbsp; "
+                    f"{_ok if isa['water_cycling'] else _fail} Water cycling &nbsp; "
+                    f"{_ok if isa['volatile_retention'] else _fail} Volatile retention"
                 )
             except Exception:
                 pass

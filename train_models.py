@@ -88,20 +88,43 @@ def train_elm(n_samples: int = 5000, n_ensemble: int = 10, n_neurons: int = 500)
 # ── 2. CTGAN ──────────────────────────────────────────────────────────────────
 
 def train_ctgan(epochs: int = 300):
+    import os
+    import warnings
+
     from modules.data_augmentation import ExoplanetDataAugmenter
-    from modules.nasa_client import get_all_confirmed_planets
+    from modules.combined_catalog import DATA_DIR, build_combined_catalog
+
+    # Optional: auto-fetch EU/DACE catalogs if missing, so the combined
+    # catalog can include more than NASA.
+    eu_path = os.path.join(DATA_DIR, "exoplanet_eu_raw.csv")
+    dace_path = os.path.join(DATA_DIR, "dace_raw.csv")
+    if not (os.path.exists(eu_path) and os.path.exists(dace_path)):
+        try:
+            from tools.data_fetch import main as fetch_data
+
+            print("  European catalogs missing – running tools/data_fetch.py...")
+            fetch_data()
+        except Exception as exc:  # pragma: no cover - best-effort fetch
+            print(f"  [WARN] Could not fetch European catalogs automatically: {exc}")
 
     print(f"\n{'='*60}")
     print("  CTGAN Data Augmentation Training")
     print(f"{'='*60}")
     print(f"  Epochs: {epochs}")
 
-    print("  Fetching NASA catalog...")
-    raw = get_all_confirmed_planets()
-    print(f"  Downloaded {len(raw)} confirmed planets")
+    print("  Building combined exoplanet catalog (NASA + EU + DACE)...")
+    raw = build_combined_catalog()
+    print(f"  Combined catalog size: {len(raw)} unique planets")
+
+    # Suppress benign cuBLAS context warnings from PyTorch during GAN training.
+    warnings.filterwarnings(
+        "ignore",
+        message="Attempting to run cuBLAS, but there was no current CUDA context!",
+        category=UserWarning,
+    )
 
     aug = ExoplanetDataAugmenter(epochs=epochs)
-    data = aug.prepare_data(raw)
+    data = aug.prepare_normalised_data(raw)
 
     t0 = time.time()
     aug.train(data)
