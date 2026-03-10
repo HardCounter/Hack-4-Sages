@@ -17,7 +17,7 @@ import time
 import numpy as np
 import pandas as pd
 import plotly.graph_objects as go
-import streamlit as st
+import  streamlit as st
 
 # ─── Page config (must be first Streamlit call) ──────────────────────────────
 
@@ -393,11 +393,13 @@ with tab_manual:
 
             # SEPHI traffic lights
             sp = d["SEPHI"]
+            _ok = "\u2705"
+            _fail = "\u274c"
             st.markdown(
                 f"**SEPHI** &nbsp; "
-                f"{'\\u2705' if sp['thermal_ok'] else '\\u274c'} Thermal &nbsp; "
-                f"{'\\u2705' if sp['atmosphere_ok'] else '\\u274c'} Atmosphere &nbsp; "
-                f"{'\\u2705' if sp['magnetic_ok'] else '\\u274c'} Magnetic &nbsp; "
+                f"{_ok if sp['thermal_ok'] else _fail} Thermal &nbsp; "
+                f"{_ok if sp['atmosphere_ok'] else _fail} Atmosphere &nbsp; "
+                f"{_ok if sp['magnetic_ok'] else _fail} Magnetic &nbsp; "
                 f"(Score: **{sp['sephi_score']:.2f}**)"
             )
 
@@ -682,11 +684,13 @@ with tab_science:
                 ic1, ic2 = st.columns(2)
                 ic1.metric("ISA Score", f"{isa['isa_score']:.2f}")
                 ic2.metric("Outgassing", f"{isa['outgassing']['outgassing_rate_earth']:.2f}x Earth")
+                _ok = "\u2705"
+                _fail = "\u274c"
                 st.markdown(
-                    f"{'\\u2705' if isa['plate_tectonics_likely'] else '\\u274c'} Plate tectonics &nbsp; "
-                    f"{'\\u2705' if isa['carbonate_silicate_cycle'] else '\\u274c'} C-Si cycle &nbsp; "
-                    f"{'\\u2705' if isa['water_cycling'] else '\\u274c'} Water cycling &nbsp; "
-                    f"{'\\u2705' if isa['volatile_retention'] else '\\u274c'} Volatile retention"
+                    f"{_ok if isa['plate_tectonics_likely'] else _fail} Plate tectonics &nbsp; "
+                    f"{_ok if isa['carbonate_silicate_cycle'] else _fail} C-Si cycle &nbsp; "
+                    f"{_ok if isa['water_cycling'] else _fail} Water cycling &nbsp; "
+                    f"{_ok if isa['volatile_retention'] else _fail} Volatile retention"
                 )
             except Exception:
                 pass
