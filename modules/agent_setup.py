@@ -152,17 +152,133 @@ def run_climate_simulation(
 
 
 @tool
-def consult_domain_expert(question: str) -> str:
+def consult_domain_expert(question: str, context: str = "") -> str:
     """Ask the astrophysics domain-expert model for a scientific interpretation.
 
-    Use this for deep scientific reasoning about habitability, climate
-    states, or stellar physics.
+    ALWAYS call this after computing habitability metrics or running a
+    simulation — never present raw numbers without expert interpretation.
 
     Args:
         question: A scientific question to pose to the domain expert.
+        context: Optional JSON-encoded structured data (simulation
+            results, NASA data) to give the expert more context.
     """
-    response = domain_llm.invoke(question)
+    full_prompt = question
+    if context:
+        full_prompt = (
+            f"Context data:\n{context}\n\n"
+            f"Question: {question}"
+        )
+    response = domain_llm.invoke(full_prompt)
     return response.content
+
+
+@tool
+def discover_most_habitable(top_n: int = 5) -> str:
+    """Query NASA for habitable-zone candidates, rank them by ESI,
+    and ask the domain expert to evaluate the top results.
+
+    This is a multi-step tool that exercises both LLMs.
+
+    Args:
+        top_n: How many top planets to return (default 5).
+    """
+    from modules.nasa_client import get_habitable_candidates
+    from modules.astro_physics import (
+        compute_esi,
+        equilibrium_temperature,
+        estimate_density,
+        estimate_escape_velocity,
+    )
+
+    cand = get_habitable_candidates()
+    if cand is None or cand.empty:
+        return "No habitable-zone candidates found."
+
+    R_JUP_TO_EARTH = 11.209
+    M_JUP_TO_EARTH = 317.83
+
+    scored = []
+    for _, row in cand.iterrows():
+        try:
+            r_e = float(row.get("pl_radj", 0)) * R_JUP_TO_EARTH
+            m_e = float(row.get("pl_bmassj", 0)) * M_JUP_TO_EARTH
+            a = float(row.get("pl_orbsmax", 0))
+            t_star = float(row.get("st_teff", 0))
+            r_star = float(row.get("st_rad", 0))
+            if r_e <= 0 or m_e <= 0 or a <= 0 or t_star <= 0 or r_star <= 0:
+                continue
+            T_eq = equilibrium_temperature(t_star, r_star, a, 0.3, True)
+            dens = estimate_density(m_e, r_e)
+            v_esc = estimate_escape_velocity(m_e, r_e)
+            esi = compute_esi(r_e, dens, v_esc, T_eq)
+            scored.append({
+                "name": row.get("pl_name", "?"),
+                "ESI": round(esi, 4),
+                "T_eq_K": round(T_eq, 1),
+                "R_earth": round(r_e, 2),
+                "M_earth": round(m_e, 2),
+            })
+        except Exception:
+            continue
+
+    scored.sort(key=lambda x: x["ESI"], reverse=True)
+    top = scored[:top_n]
+
+    expert_prompt = (
+        "Rank and evaluate these exoplanet candidates for habitability. "
+        "For each planet give one sentence of scientific reasoning.\n\n"
+        + json.dumps(top, indent=2)
+    )
+    expert_opinion = domain_llm.invoke(expert_prompt).content
+    return f"Top {top_n} by ESI:\n{json.dumps(top, indent=2)}\n\nDomain-expert evaluation:\n{expert_opinion}"
+
+
+@tool
+def compare_two_planets(planet_a_name: str, planet_b_name: str) -> str:
+    """Fetch data for two planets, compute indices, and produce a
+    comparative habitability analysis using the domain expert.
+
+    Args:
+        planet_a_name: First planet catalogue name.
+        planet_b_name: Second planet catalogue name.
+    """
+    from modules.nasa_client import get_planet_data
+    from modules.astro_physics import compute_full_analysis
+
+    R_JUP_TO_EARTH = 11.209
+    M_JUP_TO_EARTH = 317.83
+
+    results = {}
+    for name in (planet_a_name, planet_b_name):
+        row = get_planet_data(name)
+        if row is None:
+            return f"Planet not found: {name}"
+        d = row.to_dict()
+        try:
+            analysis = compute_full_analysis(
+                float(d.get("st_teff", 5778)),
+                float(d.get("st_rad", 1.0)),
+                float(d.get("pl_radj", 0.1)),
+                float(d.get("pl_bmassj", 0.003)),
+                float(d.get("pl_orbsmax", 1.0)),
+                0.3,
+                True,
+            )
+            d.update(analysis)
+        except Exception:
+            pass
+        results[name] = d
+
+    expert_prompt = (
+        "Compare these two exoplanets in terms of habitability. "
+        "Write 4-5 sentences covering temperature, stellar environment, "
+        "size, and overall prospects.\n\n"
+        f"Planet A ({planet_a_name}):\n{json.dumps(results[planet_a_name], indent=2, default=str)}\n\n"
+        f"Planet B ({planet_b_name}):\n{json.dumps(results[planet_b_name], indent=2, default=str)}"
+    )
+    comparison = domain_llm.invoke(expert_prompt).content
+    return comparison
 
 
 # ─── Tool registry ────────────────────────────────────────────────────────────
@@ -172,6 +288,8 @@ tools = [
     compute_habitability,
     run_climate_simulation,
     consult_domain_expert,
+    discover_most_habitable,
+    compare_two_planets,
 ]
 
 # ─── Agent prompt ─────────────────────────────────────────────────────────────
@@ -184,13 +302,18 @@ CAPABILITIES
 2. Compute habitability indices: T_eq, ESI, SEPHI, stellar flux (compute_habitability)
 3. Run an ELM climate surrogate for temperature-map prediction (run_climate_simulation)
 4. Consult an astrophysics domain expert for scientific interpretation (consult_domain_expert)
+5. Discover the most habitable planets in the archive (discover_most_habitable)
+6. Compare two planets side-by-side (compare_two_planets)
 
 PROCEDURE
 1. When the user asks about a planet → first fetch data from NASA.
 2. From the data → compute habitability metrics.
-3. If requested → run a climate simulation.
-4. For deep scientific explanations → consult the domain expert.
-5. Summarise results clearly.
+3. ALWAYS consult the domain expert after computing habitability metrics.
+   Never present raw numbers without expert interpretation. Pass the
+   computed results as the `context` parameter.
+4. If a climate simulation is requested or relevant → run it, then
+   consult the domain expert again to interpret the temperature map.
+5. Synthesise the domain expert's opinion with the numbers into a clear answer.
 
 RULES
 - Always cite the data source (NASA Exoplanet Archive).
@@ -198,6 +321,8 @@ RULES
 - Express temperatures in Kelvin.
 - ESI is in [0, 1]; 1.0 = identical to Earth.
 - Flag uncertainties and model limitations.
+- When comparing planets, prefer the compare_two_planets tool.
+- For "find habitable" queries, use discover_most_habitable.
 """
 
 prompt = ChatPromptTemplate.from_messages(

@@ -1,0 +1,192 @@
+"""
+One-shot training script — populates the models/ directory.
+
+Run once after installing dependencies:
+
+    python train_models.py
+
+What it trains
+--------------
+1. ELM ensemble   (~5 seconds on CPU)  → models/elm_ensemble.pkl
+2. CTGAN           (minutes, GPU helps) → models/ctgan_exoplanets.pkl  [optional]
+3. PINNFormer 3-D  (1-2 h on GPU)      → models/pinn3d_weights.pt     [optional]
+
+Pass flags to control scope:
+
+    python train_models.py                  # ELM only (fast, always safe)
+    python train_models.py --ctgan          # ELM + CTGAN
+    python train_models.py --pinn           # ELM + PINNFormer
+    python train_models.py --ctgan --pinn   # everything
+"""
+
+import argparse
+import os
+import sys
+import time
+
+MODELS_DIR = os.path.join(os.path.dirname(__file__), "models")
+
+
+def ensure_dir():
+    os.makedirs(MODELS_DIR, exist_ok=True)
+
+
+# ── 1. ELM ensemble ──────────────────────────────────────────────────────────
+
+def train_elm(n_samples: int = 5000, n_ensemble: int = 10, n_neurons: int = 500):
+    from modules.elm_surrogate import ELMClimateSurrogate, generate_analytical_training_data
+
+    print(f"\n{'='*60}")
+    print("  ELM Ensemble Training")
+    print(f"{'='*60}")
+    print(f"  Samples : {n_samples}")
+    print(f"  Ensemble: {n_ensemble} models x {n_neurons} neurons")
+
+    t0 = time.time()
+    X, y = generate_analytical_training_data(n_samples=n_samples)
+    print(f"  Data generated in {time.time()-t0:.1f}s  (X={X.shape}, y={y.shape})")
+
+    model = ELMClimateSurrogate(
+        n_ensemble=n_ensemble, n_neurons=n_neurons, alpha=1e-4
+    )
+    t1 = time.time()
+    model.train(X, y)
+    print(f"  Training completed in {time.time()-t1:.1f}s")
+
+    path = os.path.join(MODELS_DIR, "elm_ensemble.pkl")
+    model.save(path)
+    print(f"  Saved → {path}")
+
+    # Quick sanity check — predict Proxima Centauri b
+    params = {
+        "radius_earth": 1.07,
+        "mass_earth": 1.27,
+        "semi_major_axis_au": 0.0485,
+        "star_teff_K": 3042,
+        "star_radius_solar": 0.141,
+        "insol_earth": 0.65,
+        "albedo": 0.3,
+        "tidally_locked": 1,
+    }
+    tmap = model.predict_from_params(params)
+    print(f"  Sanity check (Proxima Cen b): "
+          f"T_min={tmap.min():.0f} K, T_max={tmap.max():.0f} K, "
+          f"shape={tmap.shape}")
+
+
+# ── 2. CTGAN ──────────────────────────────────────────────────────────────────
+
+def train_ctgan(epochs: int = 300):
+    from modules.data_augmentation import ExoplanetDataAugmenter
+    from modules.nasa_client import get_all_confirmed_planets
+
+    print(f"\n{'='*60}")
+    print("  CTGAN Data Augmentation Training")
+    print(f"{'='*60}")
+    print(f"  Epochs: {epochs}")
+
+    print("  Fetching NASA catalog...")
+    raw = get_all_confirmed_planets()
+    print(f"  Downloaded {len(raw)} confirmed planets")
+
+    aug = ExoplanetDataAugmenter(epochs=epochs)
+    data = aug.prepare_data(raw)
+
+    t0 = time.time()
+    aug.train(data)
+    print(f"  Training completed in {time.time()-t0:.1f}s")
+
+    synth = aug.generate_synthetic_planets(n_samples=5000)
+    valid = aug.validate_synthetic_data(synth)
+    print(f"  Generated {len(synth)} → {len(valid)} physically valid synthetics")
+
+    path = os.path.join(MODELS_DIR, "ctgan_exoplanets.pkl")
+    aug.save_model(path)
+    print(f"  Saved → {path}")
+
+
+# ── 3. PINNFormer 3-D ────────────────────────────────────────────────────────
+
+def train_pinn(epochs: int = 5000, n_colloc: int = 8192):
+    from modules.pinnformer3d import train_pinnformer, save_pinnformer
+
+    print(f"\n{'='*60}")
+    print("  PINNFormer 3-D Training")
+    print(f"{'='*60}")
+
+    import torch
+    device = "cuda" if torch.cuda.is_available() else "cpu"
+    print(f"  Device : {device}")
+    if device == "cuda":
+        print(f"  GPU    : {torch.cuda.get_device_name(0)}")
+        vram = torch.cuda.get_device_properties(0).total_mem / 1e9
+        print(f"  VRAM   : {vram:.1f} GB")
+    print(f"  Collocation points: {n_colloc}")
+    print(f"  Epochs: {epochs}")
+
+    t0 = time.time()
+    model = train_pinnformer(
+        n_colloc=n_colloc, epochs=epochs, device=device, log_every=500
+    )
+    elapsed = time.time() - t0
+    print(f"  Training completed in {elapsed/60:.1f} min")
+
+    path = os.path.join(MODELS_DIR, "pinn3d_weights.pt")
+    save_pinnformer(model, path)
+    print(f"  Saved → {path}")
+
+
+# ── CLI ───────────────────────────────────────────────────────────────────────
+
+def main():
+    parser = argparse.ArgumentParser(
+        description="Train all models for the Exoplanetary Digital Twin."
+    )
+    parser.add_argument(
+        "--ctgan", action="store_true",
+        help="Also train CTGAN (requires internet for NASA data)"
+    )
+    parser.add_argument(
+        "--pinn", action="store_true",
+        help="Also train PINNFormer 3-D (requires PyTorch; GPU strongly recommended)"
+    )
+    parser.add_argument(
+        "--elm-samples", type=int, default=5000,
+        help="Number of synthetic training samples for ELM (default: 5000)"
+    )
+    parser.add_argument(
+        "--ctgan-epochs", type=int, default=300,
+        help="CTGAN training epochs (default: 300)"
+    )
+    parser.add_argument(
+        "--pinn-epochs", type=int, default=5000,
+        help="PINNFormer training epochs (default: 5000)"
+    )
+    args = parser.parse_args()
+
+    ensure_dir()
+
+    # ELM always runs — it's fast and essential
+    train_elm(n_samples=args.elm_samples)
+
+    if args.ctgan:
+        train_ctgan(epochs=args.ctgan_epochs)
+
+    if args.pinn:
+        train_pinn(epochs=args.pinn_epochs)
+
+    print(f"\n{'='*60}")
+    print("  All done! Contents of models/:")
+    print(f"{'='*60}")
+    for f in sorted(os.listdir(MODELS_DIR)):
+        size = os.path.getsize(os.path.join(MODELS_DIR, f))
+        if size > 1_000_000:
+            print(f"  {f:40s} {size/1_000_000:.1f} MB")
+        else:
+            print(f"  {f:40s} {size/1_000:.1f} KB")
+
+    print("\nYou can now run:  streamlit run app.py")
+
+
+if __name__ == "__main__":
+    main()

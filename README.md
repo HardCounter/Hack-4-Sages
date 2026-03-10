@@ -73,22 +73,25 @@ ollama list
 
 Ollama automatically starts a local API server on `http://localhost:11434`. On NVIDIA GPUs it uses the CUDA backend by default.
 
-### 4. (Optional) Train the ELM climate surrogate
+### 4. Train the models
 
-The app works without a pre-trained ELM — it falls back to an analytical model. To train the ELM ensemble for better predictions:
+A single script trains everything and populates the `models/` directory:
 
-```python
-python -c "
-from modules.elm_surrogate import ELMClimateSurrogate, generate_analytical_training_data
-X, y = generate_analytical_training_data(n_samples=5000)
-model = ELMClimateSurrogate(n_ensemble=10, n_neurons=500)
-model.train(X, y)
-model.save('models/elm_ensemble.pkl')
-print('ELM ensemble saved.')
-"
+```bash
+# Fast default — trains ELM only (~5 seconds on CPU)
+python train_models.py
+
+# Full suite — ELM + CTGAN + PINNFormer (needs internet + GPU)
+python train_models.py --ctgan --pinn
 ```
 
-This takes a few seconds on CPU.
+| Flag | What it trains | Time | Requirements |
+|------|---------------|------|-------------|
+| *(none)* | ELM ensemble | ~5 s | CPU |
+| `--ctgan` | + CTGAN augmenter | ~5–15 min | Internet (downloads NASA catalog), GPU helps |
+| `--pinn` | + PINNFormer 3-D | ~1–2 h | PyTorch, GPU strongly recommended, no internet needed |
+
+The app works even without trained models — it falls back to an analytical model for climate maps. But running at least `python train_models.py` (ELM) gives much better predictions.
 
 ### 5. Launch the application
 
@@ -142,45 +145,21 @@ Available after running a simulation:
 - **Export** — download the 3-D globe as a standalone interactive HTML file
 - **Docker** — deployment instructions
 
-## Optional advanced training
+## Advanced training options
 
-### CTGAN data augmentation
+The `train_models.py` script accepts extra tuning flags:
 
-```python
-python -c "
-from modules.nasa_client import get_all_confirmed_planets
-from modules.data_augmentation import ExoplanetDataAugmenter
-
-raw = get_all_confirmed_planets()
-aug = ExoplanetDataAugmenter(epochs=300)
-data = aug.prepare_data(raw)
-aug.train(data)
-synth = aug.generate_synthetic_planets(n_samples=5000)
-valid = aug.validate_synthetic_data(synth)
-aug.save_model('models/ctgan_exoplanets.pkl')
-print(f'{len(valid)} validated synthetic planets saved.')
-"
+```bash
+python train_models.py --elm-samples 10000        # more training data for ELM
+python train_models.py --ctgan --ctgan-epochs 500  # longer CTGAN training
+python train_models.py --pinn --pinn-epochs 10000  # longer PINNFormer training
 ```
 
-### PINNFormer 3-D (requires PyTorch + CUDA)
+You can also train the lightweight 1-D PINN fallback (DeepXDE, CPU-friendly):
 
 ```python
-python -c "
-from modules.pinnformer3d import train_pinnformer, save_pinnformer
-model = train_pinnformer(n_colloc=8192, epochs=5000, device='cuda')
-save_pinnformer(model, 'models/pinn3d_weights.pt')
-print('PINNFormer saved.')
-"
-```
-
-### DeepXDE 1-D PINN (CPU-friendly fallback)
-
-```python
-python -c "
 from modules.pinn_heat import train_1d_pinn
 model = train_1d_pinn(epochs=10000)
-print('1-D PINN training complete.')
-"
 ```
 
 ## Project structure

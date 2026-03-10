@@ -167,31 +167,53 @@ with tab_agent:
                     st.markdown(answer)
 
             st.session_state.chat_history.append({"role": "assistant", "content": answer})
+            st.session_state["_last_agent_steps"] = steps
 
-            # Proactive suggestions (enhancement B4)
+            # Proactive suggestions (LLM-generated via Qwen)
             st.markdown("---")
             st.markdown("**Suggested next steps:**")
+            try:
+                from modules.llm_helpers import generate_smart_suggestions
+                convo_summary = "\n".join(
+                    f"{m['role']}: {m['content'][:200]}"
+                    for m in st.session_state.chat_history[-6:]
+                )
+                suggestions = generate_smart_suggestions(convo_summary)
+            except Exception:
+                suggestions = [
+                    "Run a climate simulation for this planet",
+                    "Compare with Earth",
+                    "Find similar planets in the catalog",
+                ]
             s_cols = st.columns(3)
-            suggestions = [
-                "Run a climate simulation for this planet",
-                "Compare with Earth",
-                "Find similar planets in the catalog",
-            ]
             for c, s in zip(s_cols, suggestions):
                 with c:
-                    if st.button(s, key=f"sug_{s[:20]}"):
+                    if st.button(s, key=f"sug_{hash(s)}"):
                         st.session_state.chat_history.append({"role": "user", "content": s})
                         st.rerun()
 
     # Transparent reasoning panel (enhancement B2)
     with col_reasoning:
         st.subheader("\U0001f9e0 Reasoning Chain")
-        if "steps" in dir() and steps:  # noqa: F821 – set above
-            for i, (action, obs) in enumerate(steps):
-                with st.expander(f"Step {i+1}: {action.tool}", expanded=(i == 0)):
-                    st.markdown(f"**Tool:** `{action.tool}`")
-                    st.markdown(f"**Input:** `{action.tool_input}`")
-                    st.markdown(f"**Output:** {obs[:500]}")
+        _steps = st.session_state.get("_last_agent_steps", [])
+        if _steps:
+            for i, (action, obs) in enumerate(_steps):
+                is_expert = action.tool == "consult_domain_expert"
+                if is_expert:
+                    st.markdown(
+                        '<div style="background:linear-gradient(135deg,#1a237e,#4a148c);'
+                        'padding:12px;border-radius:8px;border:1px solid #7c4dff;'
+                        'margin-bottom:8px">'
+                        '<strong style="color:#b388ff">'
+                        '\U0001f52d Expert Opinion</strong></div>',
+                        unsafe_allow_html=True,
+                    )
+                    st.markdown(obs[:800])
+                else:
+                    with st.expander(f"Step {i+1}: {action.tool}", expanded=(i == 0)):
+                        st.markdown(f"**Tool:** `{action.tool}`")
+                        st.markdown(f"**Input:** `{action.tool_input}`")
+                        st.markdown(f"**Output:** {obs[:500]}")
         else:
             st.info("Reasoning steps appear here after each agent response.")
 
@@ -342,6 +364,54 @@ with tab_manual:
                     st.session_state.temperature_map, "Custom Planet"
                 )
             st.plotly_chart(fig, use_container_width=True)
+
+            # ── AI Interpretation & Physics Review (dual-LLM) ─────────
+            with st.expander("AI Interpretation", expanded=False):
+                try:
+                    from modules.llm_helpers import (
+                        classify_climate_state,
+                        interpret_simulation,
+                        review_elm_output,
+                    )
+                    with st.spinner("Domain expert interpreting results..."):
+                        interp = interpret_simulation(d)
+                    st.markdown(interp)
+
+                    with st.spinner("Classifying climate state..."):
+                        tmap = st.session_state.temperature_map
+                        cls = classify_climate_state(
+                            float(tmap.min()), float(tmap.max()),
+                            float(tmap.mean()), locked,
+                        )
+                    state_emoji = {
+                        "Eyeball": "\U0001f441\ufe0f", "Lobster": "\U0001f99e",
+                        "Greenhouse": "\U0001f525", "Temperate": "\U0001f33f",
+                    }.get(cls.get("state", ""), "\u2753")
+                    st.info(
+                        f"**Climate state:** {state_emoji} {cls.get('state', 'Unknown')} "
+                        f"({cls.get('confidence', '?')} confidence)\n\n"
+                        f"{cls.get('reason', '')}"
+                    )
+
+                    with st.spinner("Physics plausibility review..."):
+                        params_for_review = {
+                            "star_teff": star_teff, "star_radius": star_radius,
+                            "planet_radius": planet_radius, "planet_mass": planet_mass,
+                            "semi_major": semi_major, "albedo": albedo,
+                            "tidally_locked": locked,
+                        }
+                        review = review_elm_output(
+                            params_for_review,
+                            float(tmap.min()), float(tmap.max()), float(tmap.mean()),
+                        )
+                    if review.lower().startswith("plausible"):
+                        st.success(f"\u2705 {review}")
+                    elif review.lower().startswith("warning"):
+                        st.warning(f"\u26a0\ufe0f {review}")
+                    else:
+                        st.info(review)
+                except Exception:
+                    st.caption("*AI interpretation unavailable (Ollama not running).*")
         else:
             st.info("Adjust parameters and press **Run Simulation** (or enable live mode).")
 
@@ -352,6 +422,31 @@ with tab_manual:
 
 with tab_catalog:
     st.subheader("\U0001f4ca Habitable-Zone Candidates — NASA Exoplanet Archive")
+
+    # ── Natural-language ADQL query (Qwen orchestrator) ───────────
+    nl_query = st.text_input(
+        "\U0001f50d Search planets in natural language",
+        placeholder="e.g. rocky planets closer than 10 parsecs",
+    )
+    if nl_query:
+        try:
+            from modules.llm_helpers import generate_adql_query
+            with st.spinner("Qwen translating to ADQL..."):
+                adql = generate_adql_query(nl_query)
+            if adql:
+                st.code(adql, language="sql")
+                with st.spinner("Executing query..."):
+                    from modules.nasa_client import query_nasa_archive
+                    nl_results = query_nasa_archive(adql)
+                if nl_results is not None and not nl_results.empty:
+                    st.dataframe(nl_results, use_container_width=True)
+                    st.success(f"Found {len(nl_results)} results")
+                else:
+                    st.warning("Query returned no results.")
+            else:
+                st.warning("Could not generate ADQL query.")
+        except Exception as exc:
+            st.error(f"ADQL search error: {exc}")
 
     st.markdown("##### \u2b50 Famous Exoplanets")
     famous = [
@@ -378,7 +473,17 @@ with tab_catalog:
                 from modules.nasa_client import get_planet_data
                 row = get_planet_data(st.session_state["selected_planet"])
                 if row is not None:
-                    st.json(row.to_dict())
+                    raw_dict = row.to_dict()
+                    # Domain-expert summary instead of raw JSON
+                    try:
+                        from modules.llm_helpers import summarise_planet_data
+                        with st.spinner("Domain expert summarising..."):
+                            summary = summarise_planet_data(raw_dict)
+                        st.markdown(summary)
+                    except Exception:
+                        pass
+                    with st.expander("Raw data"):
+                        st.json(raw_dict)
                 else:
                     st.warning("Planet not found in archive.")
             except Exception as exc:
@@ -407,6 +512,28 @@ with tab_science:
     if d is None or tmap is None:
         st.info("Run a simulation first (Manual Mode tab).")
     else:
+        # ── Scientific Narrative (domain expert) ──────────────────
+        try:
+            from modules.llm_helpers import narrate_science_panel
+            with st.spinner("Domain expert writing scientific narrative..."):
+                equator = tmap[tmap.shape[0] // 2, :]
+                cs_stats = {
+                    "T_min_equator": float(equator.min()),
+                    "T_max_equator": float(equator.max()),
+                    "T_mean_equator": float(equator.mean()),
+                    "gradient_K": float(equator.max() - equator.min()),
+                }
+                narrative = narrate_science_panel(
+                    hz_data=d,
+                    cross_section_stats=cs_stats,
+                    uncertainty_note="ELM ensemble std-dev or +/-15 K analytical uncertainty",
+                )
+            st.markdown("### Scientific Narrative")
+            st.markdown(narrative)
+            st.markdown("---")
+        except Exception:
+            pass
+
         sci1, sci2 = st.columns(2)
 
         # ── Habitable-Zone diagram (enhancement C1) ──
@@ -462,6 +589,23 @@ with tab_science:
         uncert_cols[0].metric("T_eq \u00b1", "\u00b115 K (albedo uncertainty)")
         uncert_cols[1].metric("ESI \u00b1", "\u00b10.05 (propagated)")
         uncert_cols[2].metric("HSF \u00b1", "\u00b15 pp")
+
+        # ── Compare with Earth (domain expert) ──────────────────
+        if st.button("\U0001f30d Compare with Earth"):
+            try:
+                from modules.llm_helpers import compare_planets
+                earth_params = {
+                    "name": "Earth",
+                    "T_eq": 255, "ESI": 1.0, "SEPHI": {"sephi_score": 1.0},
+                    "HSF": 0.65, "flux_earth": 1.0,
+                    "radius_earth": 1.0, "mass_earth": 1.0,
+                    "semi_major_au": 1.0, "star_teff": 5778,
+                }
+                with st.spinner("Domain expert comparing with Earth..."):
+                    comp = compare_planets(d, earth_params)
+                st.markdown(comp)
+            except Exception:
+                st.caption("*Comparison unavailable (Ollama not running).*")
 
         # ── Planetary soundscape (enhancement F1) ──
         st.subheader("\U0001f50a Planetary Soundscape")
