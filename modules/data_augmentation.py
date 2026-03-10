@@ -60,6 +60,36 @@ class ExoplanetDataAugmenter:
         self.discrete_columns = ["habitable"]
         return data
 
+    def prepare_normalised_data(self, df: pd.DataFrame) -> pd.DataFrame:
+        """Prepare data when columns are already in the normalised schema.
+
+        Expects columns matching the combined catalog schema:
+        radius_earth, mass_earth, semi_major_axis_au, period_days,
+        insol_earth, t_eq_K, star_teff_K, star_radius_solar, star_mass_solar.
+        """
+        cols = [
+            "radius_earth",
+            "mass_earth",
+            "semi_major_axis_au",
+            "period_days",
+            "insol_earth",
+            "t_eq_K",
+            "star_teff_K",
+            "star_radius_solar",
+            "star_mass_solar",
+        ]
+        data = df[cols].copy().dropna()
+
+        # Binary habitability label in the same spirit as prepare_data()
+        data["habitable"] = (
+            data["radius_earth"].between(0.5, 2.5)
+            & data["insol_earth"].between(0.2, 2.0)
+            & data["star_teff_K"].between(2500, 7000)
+        ).astype(int)
+
+        self.discrete_columns = ["habitable"]
+        return data
+
     # ── training ──────────────────────────────────────────────────────────
 
     def train(self, data: pd.DataFrame) -> None:
@@ -98,19 +128,54 @@ class ExoplanetDataAugmenter:
 
     @staticmethod
     def validate_synthetic_data(synthetic: pd.DataFrame) -> pd.DataFrame:
+        # Hard physical sanity filters to remove clearly unphysical samples.
+        s = synthetic.copy()
+
+        # Drop any rows with NaNs in core columns first.
+        core_cols = [
+            "radius_earth",
+            "mass_earth",
+            "semi_major_axis_au",
+            "period_days",
+            "insol_earth",
+            "t_eq_K",
+            "star_teff_K",
+            "star_radius_solar",
+            "star_mass_solar",
+        ]
+        s = s.dropna(subset=[c for c in core_cols if c in s.columns])
+
         mask = (
-            (synthetic["radius_earth"] > 0.3)
-            & (synthetic["radius_earth"] < 25.0)
-            & (synthetic["mass_earth"] > 0.01)
-            & (synthetic["mass_earth"] < 5000)
-            & (synthetic["semi_major_axis_au"] > 0.001)
-            & (synthetic["star_teff_K"] > 2300)
-            & (synthetic["star_teff_K"] < 10000)
-            & (synthetic["t_eq_K"] > 10)
-            & (synthetic["t_eq_K"] < 3000)
-            & (synthetic["period_days"] > 0.1)
+            (s["radius_earth"] > 0.3)
+            & (s["radius_earth"] < 25.0)
+            & (s["mass_earth"] > 0.01)
+            & (s["mass_earth"] < 5000)
+            & (s["semi_major_axis_au"] > 0.001)
+            & (s["semi_major_axis_au"] < 50.0)
+            & (s["insol_earth"] > 0.0)
+            & (s["insol_earth"] < 1e4)
+            & (s["t_eq_K"] > 10)
+            & (s["t_eq_K"] < 4000)
+            & (s["star_teff_K"] > 2300)
+            & (s["star_teff_K"] < 10000)
+            & (s["star_radius_solar"] > 0.05)
+            & (s["star_radius_solar"] < 20.0)
+            & (s["star_mass_solar"] > 0.05)
+            & (s["star_mass_solar"] < 20.0)
+            & (s["period_days"] > 0.1)
         )
-        return synthetic[mask].copy()
+        s = s[mask].copy()
+
+        # Clip remaining extremes to the 1st–99th percentile range per column.
+        # This keeps the bulk of the distribution while discarding outliers.
+        q_low, q_high = 0.01, 0.99
+        for col in core_cols:
+            if col not in s.columns or s[col].empty:
+                continue
+            lo, hi = np.quantile(s[col], [q_low, q_high])
+            s = s[(s[col] >= lo) & (s[col] <= hi)]
+
+        return s.copy()
 
     # ── persistence ───────────────────────────────────────────────────────
 

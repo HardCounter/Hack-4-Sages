@@ -4,7 +4,7 @@ Sanity checks for the CTGAN exoplanet data augmenter.
 Run after training with `python train_models.py --ctgan`.
 This script:
 
-* Loads the NASA confirmed-planet catalog.
+* Loads the combined exoplanet catalog (NASA + Exoplanet.eu + DACE).
 * Prepares the tabular dataset and isolates the "habitable" subset.
 * Loads (or, if missing, quickly trains) the CTGAN model.
 * Generates synthetic habitable planets.
@@ -13,15 +13,21 @@ This script:
 """
 
 import os
+import sys
 
 import numpy as np
 import pandas as pd
 
+# Ensure project root (with local ``modules`` package) is on sys.path
+ROOT_DIR = os.path.dirname(os.path.dirname(__file__))
+if ROOT_DIR not in sys.path:
+    sys.path.insert(0, ROOT_DIR)
+
 from modules.data_augmentation import ExoplanetDataAugmenter
-from modules.nasa_client import get_all_confirmed_planets
+from modules.combined_catalog import build_combined_catalog
 
 
-REPO_DIR = os.path.dirname(__file__)
+REPO_DIR = ROOT_DIR
 MODELS_DIR = os.path.join(REPO_DIR, "models")
 CTGAN_PATH = os.path.join(MODELS_DIR, "ctgan_exoplanets.pkl")
 
@@ -37,12 +43,12 @@ def _summary(df: pd.DataFrame, col: str) -> str:
 
 
 def main() -> None:
-    print("Fetching NASA confirmed-planet catalog...")
-    raw = get_all_confirmed_planets()
-    print(f"  Retrieved {len(raw)} rows.")
+    print("Building combined exoplanet catalog (NASA + Exoplanet.eu + DACE)...")
+    raw = build_combined_catalog()
+    print(f"  Combined catalog size: {len(raw)} unique planets.")
 
     augmenter = ExoplanetDataAugmenter()
-    data = augmenter.prepare_data(raw)
+    data = augmenter.prepare_normalised_data(raw)
 
     real_hab = data[data["habitable"] == 1].copy()
     print(f"Real 'habitable' subset: {len(real_hab)} planets.")
