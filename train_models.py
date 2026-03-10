@@ -115,14 +115,11 @@ def train_pinn(epochs: int = 5000, n_colloc: int = 8192):
     print(f"{'='*60}")
 
     import torch
-    # Prefer CUDA for PINN if available; attention math backend
-    # is forced inside pinnformer3d.pinn_loss_3d to support
-    # higher‑order autograd on your GPU.
     device = "cuda" if torch.cuda.is_available() else "cpu"
     print(f"  Device : {device}")
     if device == "cuda":
         print(f"  GPU    : {torch.cuda.get_device_name(0)}")
-        vram = torch.cuda.get_device_properties(0).total_memory / 1e9
+        vram = torch.cuda.get_device_properties(0).total_mem / 1e9
         print(f"  VRAM   : {vram:.1f} GB")
     print(f"  Collocation points: {n_colloc}")
     print(f"  Epochs: {epochs}")
