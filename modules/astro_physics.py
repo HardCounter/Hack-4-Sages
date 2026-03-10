@@ -195,6 +195,188 @@ def habitable_surface_fraction(
     return float(np.sum(mask * weights) / np.sum(weights))
 
 
+# ─── Interior-Surface-Atmosphere (ISA) interactions ──────────────────────────
+
+G_EARTH = 9.81   # m/s²
+R_EARTH = 6.371e6  # m
+
+
+def estimate_outgassing_rate(
+    mass_earth: float,
+    radius_earth: float,
+    age_gyr: float = 4.5,
+) -> Dict[str, float]:
+    """Estimate volcanic outgassing rate relative to Earth.
+
+    Uses a heuristic scaling: outgassing ~ (M/R²)^α × (age/4.5)^(-β),
+    reflecting the mantle convection vigor (proportional to surface
+    gravity) and radiogenic heat decay over time. Based on simplified
+    Kite et al. (2009) parameterisation.
+    """
+    g_planet = G_EARTH * mass_earth / radius_earth ** 2
+    g_ratio = g_planet / G_EARTH
+    age_factor = (age_gyr / 4.5) ** (-1.5)
+    rate_relative = g_ratio ** 0.75 * age_factor
+
+    co2_flux_earth = 6.0e12  # mol/yr (present-day Earth)
+    co2_flux = co2_flux_earth * rate_relative
+
+    return {
+        "outgassing_rate_earth": round(rate_relative, 3),
+        "co2_flux_mol_yr": round(co2_flux, 2),
+        "surface_gravity_ms2": round(g_planet, 2),
+        "mantle_convection_vigor": "high" if g_ratio > 1.2 else (
+            "moderate" if g_ratio > 0.6 else "low"
+        ),
+    }
+
+
+def estimate_isa_interaction(
+    mass_earth: float,
+    radius_earth: float,
+    T_eq: float,
+    tidally_locked: bool = True,
+    age_gyr: float = 4.5,
+) -> Dict[str, object]:
+    """Full Interior-Surface-Atmosphere interaction assessment.
+
+    Models the coupling between geological activity, surface
+    chemistry, and atmospheric composition — a key criterion for
+    realistic habitability assessment (Steinmeyer et al.).
+    """
+    outgassing = estimate_outgassing_rate(mass_earth, radius_earth, age_gyr)
+
+    has_plate_tectonics = (
+        mass_earth >= 0.5 and mass_earth <= 5.0
+        and radius_earth <= 2.0
+    )
+
+    carbonate_silicate_active = (
+        has_plate_tectonics
+        and 200 <= T_eq <= 400
+        and outgassing["outgassing_rate_earth"] > 0.3
+    )
+
+    water_cycling = 273 <= T_eq <= 373
+    volatile_retention = estimate_escape_velocity(mass_earth, radius_earth) >= 5.0
+
+    isa_score = sum([
+        has_plate_tectonics,
+        carbonate_silicate_active,
+        water_cycling,
+        volatile_retention,
+    ]) / 4.0
+
+    return {
+        "outgassing": outgassing,
+        "plate_tectonics_likely": has_plate_tectonics,
+        "carbonate_silicate_cycle": carbonate_silicate_active,
+        "water_cycling": water_cycling,
+        "volatile_retention": volatile_retention,
+        "isa_score": round(isa_score, 2),
+        "isa_assessment": (
+            "Strong ISA coupling" if isa_score >= 0.75 else
+            "Moderate ISA coupling" if isa_score >= 0.5 else
+            "Weak ISA coupling"
+        ),
+    }
+
+
+# ─── Photochemical false-positive mitigation ─────────────────────────────────
+
+def estimate_uv_flux(
+    star_teff: float,
+    star_radius: float,
+    semi_major_axis: float,
+) -> Dict[str, float]:
+    """Estimate UV radiation environment at the planet's orbit.
+
+    Hotter stars emit proportionally more UV. This is critical for
+    assessing whether biosignature-like gases (O2, O3, CH4) could be
+    produced abiotically via photolysis.
+    """
+    R_star_m = star_radius * R_SUN
+    a_m = semi_major_axis * AU
+
+    L_bol = 4 * np.pi * R_star_m**2 * STEFAN_BOLTZMANN * star_teff**4
+    t_norm = np.clip((star_teff - 2500) / (10000 - 2500), 0.0, 1.0)
+    uv_fraction = 0.005 + 0.20 * t_norm**1.3
+    L_uv = L_bol * uv_fraction
+    F_uv = L_uv / (4 * np.pi * a_m**2)
+    F_uv_earth = S_EARTH * 0.08  # ~8% of solar flux is UV
+
+    return {
+        "uv_flux_Wm2": round(float(F_uv), 2),
+        "uv_flux_earth": round(float(F_uv / F_uv_earth), 3),
+        "uv_hazard": (
+            "extreme" if F_uv / F_uv_earth > 5 else
+            "high" if F_uv / F_uv_earth > 2 else
+            "moderate" if F_uv / F_uv_earth > 0.5 else
+            "low"
+        ),
+    }
+
+
+def assess_biosignature_false_positives(
+    star_teff: float,
+    star_radius: float,
+    semi_major_axis: float,
+    T_eq: float,
+    mass_earth: float,
+    radius_earth: float,
+) -> Dict[str, object]:
+    """Assess the risk of photochemical false positives.
+
+    Evaluates whether abiotic processes (UV photolysis, outgassing)
+    could mimic biological signatures — a critical step before
+    claiming habitability (Petkowski et al.).
+    """
+    uv = estimate_uv_flux(star_teff, star_radius, semi_major_axis)
+    outgassing = estimate_outgassing_rate(mass_earth, radius_earth)
+
+    o2_false_positive_risk = (
+        "high" if (uv["uv_flux_earth"] > 3 and T_eq < 250) else
+        "moderate" if uv["uv_flux_earth"] > 1.5 else
+        "low"
+    )
+
+    ch4_false_positive_risk = (
+        "high" if outgassing["outgassing_rate_earth"] > 2.0 else
+        "moderate" if outgassing["outgassing_rate_earth"] > 0.8 else
+        "low"
+    )
+
+    o3_abiotic = uv["uv_hazard"] in ("extreme", "high") and T_eq < 280
+
+    risk_flags = []
+    if o2_false_positive_risk == "high":
+        risk_flags.append("O2 via H2O photolysis (high UV, cold trap)")
+    if ch4_false_positive_risk == "high":
+        risk_flags.append("CH4 via volcanic outgassing")
+    if o3_abiotic:
+        risk_flags.append("O3 via abiotic O2 photochemistry")
+
+    overall = (
+        "high" if len(risk_flags) >= 2 else
+        "moderate" if len(risk_flags) == 1 else
+        "low"
+    )
+
+    return {
+        "uv_environment": uv,
+        "o2_false_positive_risk": o2_false_positive_risk,
+        "ch4_false_positive_risk": ch4_false_positive_risk,
+        "o3_abiotic_likely": o3_abiotic,
+        "risk_flags": risk_flags,
+        "overall_false_positive_risk": overall,
+        "recommendation": (
+            "Biosignature claims require careful photochemical modeling"
+            if overall != "low" else
+            "Low false-positive risk — biosignatures more likely genuine"
+        ),
+    }
+
+
 # ─── Full analysis pipeline ──────────────────────────────────────────────────
 
 def compute_full_analysis(
@@ -223,6 +405,11 @@ def compute_full_analysis(
     in_hz = 0.2 <= S_norm <= 2.0
     has_liquid_water = 200 <= T_eq <= 380
 
+    isa = estimate_isa_interaction(M_earth, R_earth, T_eq, tidally_locked)
+    false_pos = assess_biosignature_false_positives(
+        stellar_temp, stellar_radius, semi_major_axis, T_eq, M_earth, R_earth
+    )
+
     return {
         "T_eq_K": T_eq,
         "flux_Wm2": S_abs,
@@ -236,4 +423,6 @@ def compute_full_analysis(
         "in_habitable_zone": in_hz,
         "liquid_water_possible": has_liquid_water,
         "tidally_locked": tidally_locked,
+        "isa_interaction": isa,
+        "biosignature_false_positives": false_pos,
     }

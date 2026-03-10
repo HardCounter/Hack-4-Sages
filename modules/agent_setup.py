@@ -281,6 +281,56 @@ def compare_two_planets(planet_a_name: str, planet_b_name: str) -> str:
     return comparison
 
 
+@tool
+def detect_anomalous_planets(top_n: int = 5) -> str:
+    """Find statistically unusual exoplanets using Isolation Forest.
+
+    Anomalous planets may represent rare habitable candidates or
+    data quality issues. Useful for the 'anomaly detection in
+    imbalanced datasets' approach.
+
+    Args:
+        top_n: Number of top anomalies to return (default 5).
+    """
+    from modules.nasa_client import get_habitable_candidates
+    from modules.anomaly_detection import get_top_anomalies
+
+    cand = get_habitable_candidates()
+    if cand is None or cand.empty:
+        return "No data available for anomaly detection."
+    anomalies = get_top_anomalies(cand, n=top_n)
+    cols = ["pl_name", "pl_radj", "pl_bmassj", "pl_orbsmax", "st_teff", "anomaly_score"]
+    display_cols = [c for c in cols if c in anomalies.columns]
+    return (
+        f"Top {top_n} anomalous planets (lower score = more unusual):\n"
+        + anomalies[display_cols].to_string(index=False)
+    )
+
+
+@tool
+def cite_scientific_literature(query: str) -> str:
+    """Search the indexed scientific literature for relevant papers.
+
+    Use this to back up claims with real citations. Returns the most
+    relevant paper abstracts and formatted references.
+
+    Args:
+        query: A scientific topic or question to find citations for.
+    """
+    from modules.rag_citations import cite_literature, format_citations_markdown
+    citations = cite_literature(query, n_results=3)
+    if not citations:
+        return "No relevant citations found."
+    details = []
+    for c in citations:
+        details.append(
+            f"**{c['authors']} ({c['year']})** — {c['title']}\n"
+            f"_{c['journal']}_\n{c['abstract'][:300]}"
+        )
+    formatted = format_citations_markdown(citations)
+    return "\n\n".join(details) + "\n\n" + formatted
+
+
 # ─── Tool registry ────────────────────────────────────────────────────────────
 
 tools = [
@@ -290,6 +340,8 @@ tools = [
     consult_domain_expert,
     discover_most_habitable,
     compare_two_planets,
+    detect_anomalous_planets,
+    cite_scientific_literature,
 ]
 
 # ─── Agent prompt ─────────────────────────────────────────────────────────────
@@ -304,6 +356,8 @@ CAPABILITIES
 4. Consult an astrophysics domain expert for scientific interpretation (consult_domain_expert)
 5. Discover the most habitable planets in the archive (discover_most_habitable)
 6. Compare two planets side-by-side (compare_two_planets)
+7. Detect anomalous planets in the catalog (detect_anomalous_planets)
+8. Cite scientific literature to support claims (cite_scientific_literature)
 
 PROCEDURE
 1. When the user asks about a planet → first fetch data from NASA.
@@ -323,6 +377,7 @@ RULES
 - Flag uncertainties and model limitations.
 - When comparing planets, prefer the compare_two_planets tool.
 - For "find habitable" queries, use discover_most_habitable.
+- Cite scientific literature to support key claims when relevant.
 """
 
 prompt = ChatPromptTemplate.from_messages(

@@ -127,6 +127,22 @@ def create_3d_globe(
             )
         )
 
+    # Rotation animation frames
+    n_frames = 36
+    frames = []
+    for k in range(n_frames):
+        angle = 2 * np.pi * k / n_frames
+        ex = 1.5 * np.cos(angle)
+        ey = 1.5 * np.sin(angle)
+        frames.append(go.Frame(
+            layout=dict(scene_camera=dict(
+                eye=dict(x=ex, y=ey, z=0.5),
+                up=dict(x=0, y=0, z=1),
+            )),
+            name=str(k),
+        ))
+    fig.frames = frames
+
     fig.update_layout(
         title=dict(
             text=f"\U0001fa90 {planet_name} \u2014 Surface Temperature",
@@ -148,6 +164,30 @@ def create_3d_globe(
         width=800,
         height=700,
         margin=dict(l=0, r=80, t=60, b=0),
+        updatemenus=[dict(
+            type="buttons",
+            showactive=False,
+            x=0.05, y=0.95,
+            buttons=[
+                dict(
+                    label="\u25b6 Rotate",
+                    method="animate",
+                    args=[None, dict(
+                        frame=dict(duration=80, redraw=True),
+                        fromcurrent=True,
+                        mode="immediate",
+                    )],
+                ),
+                dict(
+                    label="\u23f8 Stop",
+                    method="animate",
+                    args=[[None], dict(
+                        frame=dict(duration=0, redraw=False),
+                        mode="immediate",
+                    )],
+                ),
+            ],
+        )],
     )
     return fig
 

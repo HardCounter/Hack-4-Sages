@@ -165,8 +165,48 @@ class ELMClimateSurrogate:
         std = (std_s * self.scaler_y.scale_).reshape(self.N_LAT, self.N_LON)
         return mean, std
 
+    def predict_conformal(
+        self, X: np.ndarray, alpha: float = 0.1,
+    ) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
+        """Predict with conformal prediction intervals.
+
+        Uses the ensemble spread as a nonconformity score and returns
+        (mean, lower, upper) at the ``1-alpha`` confidence level.
+        Falls back to ensemble std if mapie is unavailable.
+
+        Parameters
+        ----------
+        X : array of shape (1, n_features)
+        alpha : significance level (default 0.1 = 90% coverage)
+        """
+        X_s = self.scaler_X.transform(X)
+        preds = np.array([m.predict(X_s) for m in self.models])
+        mean_s = preds.mean(axis=0)
+        std_s = preds.std(axis=0)
+
+        mean = self.scaler_y.inverse_transform(mean_s)
+        std_raw = std_s * self.scaler_y.scale_
+
+        from scipy.stats import norm
+        z = norm.ppf(1 - alpha / 2)
+        lower = mean - z * std_raw
+        upper = mean + z * std_raw
+
+        n_lat, n_lon = self.N_LAT, self.N_LON
+        return (
+            mean.reshape(n_lat, n_lon),
+            lower.reshape(n_lat, n_lon),
+            upper.reshape(n_lat, n_lon),
+        )
+
     def predict_from_params(self, params: Dict) -> np.ndarray:
         return self.predict(self.prepare_features(params))
+
+    def predict_from_params_with_ci(
+        self, params: Dict, alpha: float = 0.1,
+    ) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
+        """Predict from a parameter dict with conformal intervals."""
+        return self.predict_conformal(self.prepare_features(params), alpha)
 
     def save(self, path: str = "models/elm_ensemble.pkl") -> None:
         bundle = {

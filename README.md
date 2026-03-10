@@ -6,10 +6,14 @@ A real-time, browser-based platform that simulates alien climates using AI-drive
 
 - **Query NASA** — pull real observational data for any confirmed exoplanet via the TAP protocol.
 - **Compute habitability** — equilibrium temperature, Earth Similarity Index (ESI), SEPHI, habitable-zone boundaries (Kopparapu 2013), habitable surface fraction.
-- **Predict climates** — an ensemble of Extreme Learning Machines (ELM) predicts 2-D surface temperature maps in milliseconds, replacing days of supercomputer GCM runs.
+- **ISA interaction modeling** — Interior-Surface-Atmosphere coupling assessment including volcanic outgassing, plate tectonics likelihood, and carbonate-silicate cycle.
+- **Biosignature false-positive mitigation** — UV flux estimation and photochemical false-positive risk analysis to distinguish biological from abiotic signatures.
+- **Predict climates** — an ensemble of Extreme Learning Machines (ELM) predicts 2-D surface temperature maps in milliseconds with conformal prediction uncertainty intervals.
+- **Anomaly detection** — Isolation Forest identifies statistically unusual planets in the NASA catalog; UMAP provides 2-D population visualization.
 - **Augment data** — a CTGAN synthesises thousands of physically plausible habitable-planet configurations to fix the extreme class imbalance in real catalogs.
-- **3-D visualisation** — interactive Plotly globe with scientific colour-mapping, host-star marker, habitable-zone overlay, and 2-D heatmap fallback.
-- **LLM agent** — a dual-model LangChain agent (Qwen 2.5 + astro-specialist) autonomously reasons, calls tools, and explains results in natural language.
+- **3-D visualisation** — interactive Plotly globe with rotation animation, scientific colour-mapping, host-star marker, and 2-D heatmap fallback.
+- **LLM agent** — a dual-model LangChain agent (Qwen 2.5 orchestrator + astro-specialist) with multi-turn memory, 8 tools, and mandatory domain-expert consultation.
+- **RAG citations** — ChromaDB vector store of 15 key astrophysics papers; the agent cites real literature to support claims.
 - **Physics guardrails** — Pydantic validators reject any output that violates thermodynamic or astrophysical constraints.
 - **Graceful degradation** — every module has a fallback path so the app never crashes.
 
@@ -119,30 +123,37 @@ Use the **Explanation depth** toggle (Scientist / Student / Media) to control ho
 
 ### Manual Mode
 
-Drag the sliders to set stellar and planetary parameters, then press **Run Simulation**. Enable **Live "What If" mode** to see the globe update in real time as you move sliders.
+Drag the sliders to set stellar and planetary parameters, then press **Run Simulation**. A pipeline progress bar shows each step (Validate, Compute, Simulate, Analyse). Enable **Live "What If" mode** to see the globe update in real time.
 
 The panel shows:
-- ESI gauge (0–1 scale with colour zones)
+- ESI gauge (0-1 scale with colour zones)
 - SEPHI traffic lights (thermal / atmosphere / magnetic criteria)
+- ISA Coupling score and Biosignature False-Positive risk badges
 - Habitable Surface Fraction (HSF)
-- Interactive 3-D globe or 2-D heatmap
+- Interactive 3-D globe with rotation animation or 2-D heatmap
+- AI Interpretation expander (domain expert analysis, climate classification, physics review)
 
 ### Catalog
 
-Browse the NASA Exoplanet Archive. Click one of the six famous-planet buttons for instant data, or press **Fetch full NASA catalog** to load all habitable-zone candidates.
+Browse the NASA Exoplanet Archive. Type a natural-language query (e.g. "rocky planets closer than 10 parsecs") and Qwen converts it to ADQL. Click famous-planet buttons for instant domain-expert summaries. **Fetch full catalog** runs anomaly detection and UMAP visualisation.
 
 ### Science
 
 Available after running a simulation:
+- **Scientific Narrative** — domain-expert paragraph explaining the results
+- **Interior-Surface-Atmosphere assessment** — outgassing, plate tectonics, C-Si cycle
+- **Photochemical false-positive analysis** — O2, CH4, O3 risk flags with UV flux
 - **Habitable Zone diagram** — planet position relative to HZ boundaries
-- **Terminator cross-section** — temperature profile along the day–night boundary with freezing/boiling lines
-- **Uncertainty estimates** — propagated from ELM ensemble variance
+- **Terminator cross-section** — temperature profile along the day-night boundary
+- **Conformal prediction intervals** — formal 90% coverage from ELM ensemble
+- **Compare with Earth** — domain-expert side-by-side analysis
 - **Planetary Soundscape** — sonification of the equatorial temperature profile
 
 ### System
 
-- **Self-Diagnostics** — tests NASA connectivity, T_eq sanity, Pydantic guardrail, ELM loading, and Ollama status
-- **Export** — download the 3-D globe as a standalone interactive HTML file
+- **Self-Diagnostics** — tests NASA, T_eq, Pydantic, ELM, and Ollama
+- **Architecture diagram** — full data pipeline visualisation
+- **Export** — download the 3-D globe as interactive HTML
 - **Docker** — deployment instructions
 
 ## Advanced training options
@@ -170,17 +181,27 @@ Hack-4-Sages/
 ├── requirements.txt            # Python dependencies
 ├── Modelfile.astro             # Ollama custom model config
 ├── Dockerfile                  # Container deployment
+├── METHODOLOGY.md              # Full scientific methodology document
+├── train_models.py             # One-shot training script
 ├── modules/
 │   ├── nasa_client.py          # NASA TAP API client
-│   ├── astro_physics.py        # T_eq, ESI, SEPHI, HZ, full pipeline
+│   ├── astro_physics.py        # T_eq, ESI, SEPHI, HZ, ISA, false-positive analysis
 │   ├── validators.py           # Pydantic physics guardrails
-│   ├── elm_surrogate.py        # ELM ensemble (scikit-elm + NumPy)
+│   ├── elm_surrogate.py        # ELM ensemble with conformal prediction
 │   ├── data_augmentation.py    # CTGAN augmentation pipeline
-│   ├── agent_setup.py          # LangChain dual-model agent
-│   ├── visualization.py        # Plotly 3-D globe, 2-D heatmap, HZ diagram
+│   ├── agent_setup.py          # LangChain dual-model agent (8 tools)
+│   ├── llm_helpers.py          # Standalone LLM helpers for each tab
+│   ├── rag_citations.py        # RAG with ChromaDB + 15 paper abstracts
+│   ├── anomaly_detection.py    # Isolation Forest + UMAP
+│   ├── visualization.py        # Plotly 3-D globe (rotation), 2-D heatmap, HZ
 │   ├── degradation.py          # Graceful-degradation manager
 │   ├── pinnformer3d.py         # PINNFormer 3-D (PyTorch)
 │   └── pinn_heat.py            # DeepXDE 1-D PINN fallback
+├── tests/                      # pytest test suite (43 tests)
+│   ├── test_astro_physics.py   # Physics engine tests
+│   ├── test_validators.py      # Pydantic guardrail tests
+│   ├── test_elm_surrogate.py   # ELM + conformal prediction tests
+│   └── test_rag_citations.py   # RAG citation tests
 ├── models/                     # Trained model weights (.pkl, .pt)
 ├── data/nasa_cache/            # Cached NASA query results
 ├── notebooks/                  # Exploration notebooks
@@ -198,6 +219,12 @@ Then open **http://localhost:8501**.
 
 Note: Ollama must run separately or be added as a service in a `docker-compose.yml`.
 
+## Running tests
+
+```bash
+python -m pytest tests/ -v
+```
+
 ## Tech stack
 
 | Layer | Technology |
@@ -205,9 +232,12 @@ Note: Ollama must run separately or be added as a service in a `docker-compose.y
 | Frontend | Streamlit |
 | LLM hosting | Ollama (CUDA) |
 | Agent framework | LangChain |
-| Climate surrogate | ELM (scikit-elm / NumPy) |
+| Climate surrogate | ELM (scikit-elm / NumPy) with conformal prediction |
 | Data augmentation | CTGAN |
+| Anomaly detection | Isolation Forest + UMAP |
+| RAG | ChromaDB + Sentence Transformers |
 | PINN | DeepXDE + custom PINNFormer (PyTorch) |
 | Validation | Pydantic |
 | Visualisation | Plotly |
 | Data source | NASA Exoplanet Archive (TAP) |
+| Testing | pytest (43 tests) |

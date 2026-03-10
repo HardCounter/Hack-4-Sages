@@ -155,9 +155,15 @@ with tab_agent:
             with st.chat_message("assistant"):
                 with st.spinner("Agent reasoning\u2026"):
                     try:
+                        from langchain_core.messages import AIMessage, HumanMessage
+                        lc_history = []
+                        for m in st.session_state.chat_history[:-1]:
+                            cls = HumanMessage if m["role"] == "user" else AIMessage
+                            lc_history.append(cls(content=m["content"]))
+
                         agent = _load_agent()
                         response = agent.invoke(
-                            {"input": full_prompt, "chat_history": []}
+                            {"input": full_prompt, "chat_history": lc_history}
                         )
                         answer = response["output"]
                         steps = response.get("intermediate_steps", [])
@@ -247,47 +253,94 @@ with tab_manual:
 
     if should_compute:
         try:
-            from modules.astro_physics import (
-                compute_esi,
-                compute_sephi,
-                equilibrium_temperature,
-                estimate_density,
-                estimate_escape_velocity,
-                habitable_surface_fraction,
-                hz_boundaries,
-                stellar_flux,
-            )
-            from modules.visualization import (
-                create_2d_heatmap,
-                create_3d_globe,
-                create_hz_diagram,
-                generate_eyeball_map,
-            )
+            with st.status("Running simulation pipeline\u2026", expanded=True) as _pipeline:
+                from modules.astro_physics import (
+                    compute_esi,
+                    compute_sephi,
+                    equilibrium_temperature,
+                    estimate_density,
+                    estimate_escape_velocity,
+                    habitable_surface_fraction,
+                    hz_boundaries,
+                    stellar_flux,
+                )
+                from modules.degradation import GracefulDegradation
+                from modules.visualization import generate_eyeball_map
+                from modules.validators import PlanetaryParameters, SimulationOutput
 
-            T_eq = equilibrium_temperature(
-                star_teff, star_radius, semi_major, albedo, locked
-            )
-            S_abs, S_norm = stellar_flux(star_teff, star_radius, semi_major)
-            density = estimate_density(planet_mass, planet_radius)
-            v_esc = estimate_escape_velocity(planet_mass, planet_radius)
-            esi = compute_esi(planet_radius, density, v_esc, T_eq)
-            sephi = compute_sephi(T_eq, planet_mass, planet_radius)
-            temp_map = generate_eyeball_map(T_eq, tidally_locked=locked)
-            hsf = habitable_surface_fraction(temp_map)
+                _pipeline.write("\U0001f6e1\ufe0f Validating parameters\u2026")
+                PlanetaryParameters(
+                    name="Custom",
+                    radius_earth=planet_radius,
+                    mass_earth=planet_mass,
+                    semi_major_axis=semi_major,
+                    albedo=albedo,
+                    tidally_locked=locked,
+                )
 
-            st.session_state.temperature_map = temp_map
-            st.session_state.current_planet_data = {
-                "T_eq": T_eq,
-                "T_min": float(temp_map.min()),
-                "T_max": float(temp_map.max()),
-                "T_mean": float(temp_map.mean()),
-                "ESI": esi,
-                "SEPHI": sephi,
-                "HSF": hsf,
-                "flux_earth": S_norm,
-                "star_teff": star_teff,
-                "semi_major": semi_major,
-            }
+                _pipeline.write("\U0001f9ee Computing habitability indices\u2026")
+                T_eq = equilibrium_temperature(
+                    star_teff, star_radius, semi_major, albedo, locked
+                )
+                S_abs, S_norm = stellar_flux(star_teff, star_radius, semi_major)
+                density = estimate_density(planet_mass, planet_radius)
+                v_esc = estimate_escape_velocity(planet_mass, planet_radius)
+                esi = compute_esi(planet_radius, density, v_esc, T_eq)
+                sephi = compute_sephi(T_eq, planet_mass, planet_radius)
+
+                SimulationOutput(T_eq_K=T_eq, ESI=esi, flux_earth=S_norm)
+
+                _pipeline.write("\U0001f30d Generating climate map (ELM / analytical)\u2026")
+                gd = GracefulDegradation()
+
+                def _elm_predict():
+                    elm = _load_elm()
+                    if not elm.models:
+                        raise FileNotFoundError("ELM not trained")
+                    params = {
+                        "radius_earth": planet_radius,
+                        "mass_earth": planet_mass,
+                        "semi_major_axis_au": semi_major,
+                        "star_teff_K": star_teff,
+                        "star_radius_solar": star_radius,
+                        "insol_earth": S_norm,
+                        "albedo": albedo,
+                        "tidally_locked": int(locked),
+                    }
+                    return elm.predict_from_params(params)
+
+                def _analytical_fallback():
+                    return generate_eyeball_map(T_eq, tidally_locked=locked)
+
+                temp_map = gd.run_with_fallback(
+                    _elm_predict, _analytical_fallback,
+                    timeout=5.0, label="ELM Surrogate",
+                )
+                if not gd.validate_temperature_map(temp_map):
+                    temp_map = _analytical_fallback()
+
+                _pipeline.write("\U0001f4ca Computing surface fraction\u2026")
+                hsf = habitable_surface_fraction(temp_map)
+
+                st.session_state.temperature_map = temp_map
+                st.session_state.current_planet_data = {
+                    "T_eq": T_eq,
+                    "T_min": float(temp_map.min()),
+                    "T_max": float(temp_map.max()),
+                    "T_mean": float(temp_map.mean()),
+                    "ESI": esi,
+                    "SEPHI": sephi,
+                    "HSF": hsf,
+                    "flux_earth": S_norm,
+                    "star_teff": star_teff,
+                    "star_radius": star_radius,
+                    "planet_radius": planet_radius,
+                    "planet_mass": planet_mass,
+                    "semi_major": semi_major,
+                    "albedo": albedo,
+                    "tidally_locked": locked,
+                }
+                _pipeline.update(label="Simulation complete", state="complete")
         except Exception as exc:
             st.error(f"\u274c Validation failed: {exc}")
 
@@ -347,6 +400,41 @@ with tab_manual:
                 f"{'\\u2705' if sp['magnetic_ok'] else '\\u274c'} Magnetic &nbsp; "
                 f"(Score: **{sp['sephi_score']:.2f}**)"
             )
+
+            # ISA Interaction & Biosignature False-Positive badges
+            try:
+                from modules.astro_physics import (
+                    assess_biosignature_false_positives,
+                    estimate_isa_interaction,
+                )
+                isa = estimate_isa_interaction(
+                    planet_mass, planet_radius, d["T_eq"], locked,
+                )
+                fp = assess_biosignature_false_positives(
+                    star_teff, star_radius, semi_major,
+                    d["T_eq"], planet_mass, planet_radius,
+                )
+                isa_col, fp_col = st.columns(2)
+                with isa_col:
+                    isa_icon = (
+                        "\u2705" if isa["isa_score"] >= 0.75 else
+                        "\u26a0\ufe0f" if isa["isa_score"] >= 0.5 else
+                        "\u274c"
+                    )
+                    st.markdown(
+                        f"**ISA Coupling** {isa_icon} "
+                        f"{isa['isa_assessment']} (score: {isa['isa_score']:.2f})"
+                    )
+                with fp_col:
+                    fp_icon = {
+                        "low": "\u2705", "moderate": "\u26a0\ufe0f", "high": "\u274c"
+                    }.get(fp["overall_false_positive_risk"], "\u2753")
+                    st.markdown(
+                        f"**False-Positive Risk** {fp_icon} "
+                        f"{fp['overall_false_positive_risk'].title()}"
+                    )
+            except Exception:
+                pass
 
             # Globe / heatmap toggle
             view_mode = st.radio("View", ["3D Globe", "2D Heatmap"], horizontal=True)
@@ -497,6 +585,30 @@ with tab_catalog:
                 cand = get_habitable_candidates()
                 st.dataframe(cand, use_container_width=True)
                 st.success(f"Found {len(cand)} candidates")
+
+                # Anomaly detection + UMAP
+                try:
+                    from modules.anomaly_detection import (
+                        compute_umap_embedding,
+                        create_umap_figure,
+                        detect_anomalies,
+                    )
+                    with st.spinner("Running anomaly detection..."):
+                        detected = detect_anomalies(cand)
+                        n_anom = detected["is_anomaly"].sum()
+                        st.markdown(f"**Anomaly detection:** found {n_anom} unusual planets out of {len(detected)}")
+                        anom_top = detected[detected["is_anomaly"]].head(10)
+                        if not anom_top.empty:
+                            display_cols = [c for c in ["pl_name", "pl_radj", "st_teff", "pl_orbsmax", "anomaly_score"] if c in anom_top.columns]
+                            st.dataframe(anom_top[display_cols], use_container_width=True)
+
+                    with st.spinner("Computing UMAP embedding..."):
+                        emb = compute_umap_embedding(detected)
+                        if emb is not None:
+                            fig_umap = create_umap_figure(detected, emb)
+                            st.plotly_chart(fig_umap, use_container_width=True)
+                except Exception:
+                    pass
             except Exception as exc:
                 st.error(f"NASA error: {exc}")
 
@@ -512,6 +624,15 @@ with tab_science:
     if d is None or tmap is None:
         st.info("Run a simulation first (Manual Mode tab).")
     else:
+        # ── Compute HZ boundaries (shared by narrative + diagram) ──
+        _star_rad = d.get("star_radius", 1.0)
+        try:
+            from modules.astro_physics import hz_boundaries as _hz
+            lum_solar = (d["star_teff"] / 5778) ** 4 * _star_rad ** 2
+            hz = _hz(d["star_teff"], lum_solar)
+        except Exception:
+            hz = {}
+
         # ── Scientific Narrative (domain expert) ──────────────────
         try:
             from modules.llm_helpers import narrate_science_panel
@@ -524,7 +645,7 @@ with tab_science:
                     "gradient_K": float(equator.max() - equator.min()),
                 }
                 narrative = narrate_science_panel(
-                    hz_data=d,
+                    hz_data=hz,
                     cross_section_stats=cs_stats,
                     uncertainty_note="ELM ensemble std-dev or +/-15 K analytical uncertainty",
                 )
@@ -540,20 +661,62 @@ with tab_science:
         with sci1:
             st.subheader("Habitable Zone")
             try:
-                from modules.astro_physics import hz_boundaries as _hz
                 from modules.visualization import create_hz_diagram
-
-                lum_solar = (d["star_teff"] / 5778) ** 4 * (
-                    star_radius if "star_radius" in dir() else 1.0
-                ) ** 2
-                hz = _hz(d["star_teff"], lum_solar)
-                fig_hz = create_hz_diagram(hz, d["semi_major"], d["star_teff"])
-                st.plotly_chart(fig_hz, use_container_width=True)
+                if hz:
+                    fig_hz = create_hz_diagram(hz, d["semi_major"], d["star_teff"])
+                    st.plotly_chart(fig_hz, use_container_width=True)
+                else:
+                    st.warning("HZ boundaries could not be computed.")
             except Exception as exc:
                 st.warning(f"HZ diagram unavailable: {exc}")
 
-        # ── Atmospheric cross-section along terminator (enhancement C4) ──
+        # ── ISA Interaction Detail (targets Steinmeyer) ──
+        with sci1:
+            try:
+                from modules.astro_physics import estimate_isa_interaction
+                _p_rad = d.get("planet_radius", 1.0)
+                _p_mass = d.get("planet_mass", 1.0)
+                _locked = d.get("tidally_locked", True)
+                isa = estimate_isa_interaction(_p_mass, _p_rad, d["T_eq"], _locked)
+                st.subheader("Interior-Surface-Atmosphere")
+                ic1, ic2 = st.columns(2)
+                ic1.metric("ISA Score", f"{isa['isa_score']:.2f}")
+                ic2.metric("Outgassing", f"{isa['outgassing']['outgassing_rate_earth']:.2f}x Earth")
+                st.markdown(
+                    f"{'\\u2705' if isa['plate_tectonics_likely'] else '\\u274c'} Plate tectonics &nbsp; "
+                    f"{'\\u2705' if isa['carbonate_silicate_cycle'] else '\\u274c'} C-Si cycle &nbsp; "
+                    f"{'\\u2705' if isa['water_cycling'] else '\\u274c'} Water cycling &nbsp; "
+                    f"{'\\u2705' if isa['volatile_retention'] else '\\u274c'} Volatile retention"
+                )
+            except Exception:
+                pass
+
+        # ── Biosignature False-Positive Assessment (targets Petkowski) ──
         with sci2:
+            try:
+                from modules.astro_physics import assess_biosignature_false_positives
+                _p_rad = d.get("planet_radius", 1.0)
+                _p_mass = d.get("planet_mass", 1.0)
+                fp = assess_biosignature_false_positives(
+                    d["star_teff"], _star_rad, d["semi_major"],
+                    d["T_eq"], _p_mass, _p_rad,
+                )
+                st.subheader("Photochemical False Positives")
+                fp1, fp2, fp3 = st.columns(3)
+                fp1.metric("O\u2082 risk", fp["o2_false_positive_risk"].title())
+                fp2.metric("CH\u2084 risk", fp["ch4_false_positive_risk"].title())
+                fp3.metric("UV flux", f"{fp['uv_environment']['uv_flux_earth']:.1f}x Earth")
+                if fp["risk_flags"]:
+                    for flag in fp["risk_flags"]:
+                        st.warning(f"\u26a0\ufe0f {flag}")
+                st.info(fp["recommendation"])
+            except Exception:
+                pass
+
+        sci3, sci4 = st.columns(2)
+
+        # ── Atmospheric cross-section along terminator (enhancement C4) ──
+        with sci4:
             st.subheader("Terminator Cross-Section")
             n_lat = tmap.shape[0]
             equator_idx = n_lat // 2
@@ -579,16 +742,45 @@ with tab_science:
             )
             st.plotly_chart(fig_cs, use_container_width=True)
 
-        # ── Uncertainty dashboard (enhancement C6) ──
+        # ── Uncertainty dashboard (conformal prediction) ──
         st.subheader("Uncertainty Estimate")
-        st.markdown(
-            "ELM ensemble std-dev is used as an uncertainty proxy.  "
-            "For the analytical model a \u00b115 K uniform uncertainty applies."
-        )
-        uncert_cols = st.columns(3)
-        uncert_cols[0].metric("T_eq \u00b1", "\u00b115 K (albedo uncertainty)")
-        uncert_cols[1].metric("ESI \u00b1", "\u00b10.05 (propagated)")
-        uncert_cols[2].metric("HSF \u00b1", "\u00b15 pp")
+        _elm_ci_shown = False
+        try:
+            elm = _load_elm()
+            if elm.models:
+                _p_params = {
+                    "radius_earth": d.get("planet_radius", 1.0),
+                    "mass_earth": d.get("planet_mass", 1.0),
+                    "semi_major_axis_au": d.get("semi_major", 0.05),
+                    "star_teff_K": d.get("star_teff", 3000),
+                    "star_radius_solar": d.get("star_radius", 0.14),
+                    "insol_earth": d.get("flux_earth", 1.0),
+                    "albedo": d.get("albedo", 0.3),
+                    "tidally_locked": int(d.get("tidally_locked", True)),
+                }
+                mean_map, lower_map, upper_map = elm.predict_from_params_with_ci(
+                    _p_params, alpha=0.1,
+                )
+                ci_width = float((upper_map - lower_map).mean())
+                st.markdown(
+                    "**Conformal prediction** (90% coverage interval from ELM ensemble):"
+                )
+                uc1, uc2, uc3, uc4 = st.columns(4)
+                uc1.metric("T mean", f"{float(mean_map.mean()):.0f} K")
+                uc2.metric("CI width (avg)", f"\u00b1{ci_width/2:.1f} K")
+                uc3.metric("CI lower bound", f"{float(lower_map.mean()):.0f} K")
+                uc4.metric("CI upper bound", f"{float(upper_map.mean()):.0f} K")
+                _elm_ci_shown = True
+        except Exception:
+            pass
+        if not _elm_ci_shown:
+            st.markdown(
+                "Analytical model: static uncertainty estimates (ELM not loaded)."
+            )
+            uncert_cols = st.columns(3)
+            uncert_cols[0].metric("T_eq \u00b1", "\u00b115 K (albedo uncertainty)")
+            uncert_cols[1].metric("ESI \u00b1", "\u00b10.05 (propagated)")
+            uncert_cols[2].metric("HSF \u00b1", "\u00b15 pp")
 
         # ── Compare with Earth (domain expert) ──────────────────
         if st.button("\U0001f30d Compare with Earth"):
@@ -715,6 +907,59 @@ with tab_system:
         )
     else:
         st.info("Run a simulation to enable export.")
+
+    # ── Architecture diagram (targets Req 4, 7) ──
+    with st.expander("System Architecture"):
+        st.markdown("""
+```mermaid
+flowchart TB
+    subgraph UI ["Streamlit UI"]
+        AgentTab["Agent AI"]
+        ManualTab["Manual Mode"]
+        CatalogTab["Catalog"]
+        ScienceTab["Science Dashboard"]
+    end
+
+    subgraph LLM ["Dual LLM Layer (Ollama)"]
+        Qwen["Qwen 2.5-14B<br/>Orchestrator"]
+        Astro["astro-agent<br/>Domain Expert"]
+    end
+
+    subgraph ML ["ML Models"]
+        ELM["ELM Ensemble<br/>Climate Surrogate"]
+        CTGAN["CTGAN<br/>Data Augmentation"]
+        PINN["PINNFormer 3D<br/>Physics-Informed NN"]
+        IsoForest["Isolation Forest<br/>Anomaly Detection"]
+    end
+
+    subgraph Physics ["Physics Engine"]
+        Teq["T_eq Calculator"]
+        ESI["ESI / SEPHI"]
+        ISA["ISA Interactions"]
+        FP["False-Positive<br/>Mitigation"]
+        HZ["HZ Boundaries"]
+    end
+
+    subgraph Data ["Data Layer"]
+        NASA["NASA Exoplanet<br/>Archive (TAP)"]
+        RAG["RAG Citations<br/>(ChromaDB)"]
+        Pydantic["Pydantic<br/>Guardrails"]
+    end
+
+    AgentTab --> Qwen
+    Qwen --> Astro
+    Qwen --> NASA
+    Qwen --> Physics
+    ManualTab --> ELM
+    ManualTab --> Physics
+    CatalogTab --> NASA
+    CatalogTab --> IsoForest
+    ScienceTab --> Physics
+    Physics --> Pydantic
+    ELM --> Pydantic
+    Qwen --> RAG
+```
+""")
 
     # ── Docker instructions ──
     with st.expander("Docker deployment"):
