@@ -6,9 +6,12 @@ habitable-zone boundaries (Kopparapu 2013), habitable surface
 fraction, and a full analysis pipeline.
 """
 
+import logging
 from typing import Dict, Tuple
 
 import numpy as np
+
+logger = logging.getLogger(__name__)
 
 # ─── Physical constants ───────────────────────────────────────────────────────
 
@@ -36,7 +39,7 @@ def equilibrium_temperature(
     hemisphere) and 2 for a fast rotator.
     """
     R_star_m = stellar_radius * R_SUN
-    a_m = semi_major_axis * AU
+    a_m = max(semi_major_axis, 1e-6) * AU
     redistribution = np.sqrt(2) if tidally_locked else 2.0
     T_eq = (
         stellar_temp
@@ -56,7 +59,7 @@ def stellar_flux(
     Returns (S_abs [W/m²], S_norm [S_⊕]).
     """
     R_star_m = stellar_radius * R_SUN
-    a_m = semi_major_axis * AU
+    a_m = max(semi_major_axis, 1e-6) * AU
     L_star = 4 * np.pi * R_star_m**2 * STEFAN_BOLTZMANN * stellar_temp**4
     S = L_star / (4 * np.pi * a_m**2)
     S_norm = S / S_EARTH
@@ -87,9 +90,9 @@ def compute_esi(
     esi = 1.0
     for key in values:
         x, x_ref, w = values[key], ref[key], weights[key]
-        if (x + x_ref) == 0:
+        if (x + x_ref) <= 0:
             continue
-        similarity = 1.0 - abs(x - x_ref) / (x + x_ref)
+        similarity = np.clip(1.0 - abs(x - x_ref) / (x + x_ref), 0.0, 1.0)
         esi *= similarity ** (w / n)
     return round(float(esi), 4)
 
@@ -164,6 +167,12 @@ def hz_boundaries(
     Uses the parameterisation of Kopparapu et al. (2013).
     *star_luminosity_solar* is L/L☉ (linear, not log).
     """
+    if star_teff < 2600 or star_teff > 7200:
+        logger.warning(
+            "T_eff=%.0fK outside Kopparapu et al. (2013) calibration "
+            "range [2600, 7200]K — HZ boundaries are extrapolated.",
+            star_teff,
+        )
     T = star_teff - 5780.0
     result: Dict[str, float] = {}
     for label, (s0, a, b, c, d) in _HZ_COEFFS.items():
@@ -213,6 +222,14 @@ def estimate_outgassing_rate(
     gravity) and radiogenic heat decay over time. Based on simplified
     Kite et al. (2009) parameterisation.
     """
+    if radius_earth <= 0:
+        return {
+            "outgassing_rate_earth": 0.0,
+            "co2_flux_mol_yr": 0.0,
+            "surface_gravity_ms2": 0.0,
+            "mantle_convection_vigor": "low",
+        }
+    age_gyr = max(age_gyr, 0.1)  # floor at 100 Myr — youngest characterised systems
     g_planet = G_EARTH * mass_earth / radius_earth ** 2
     g_ratio = g_planet / G_EARTH
     age_factor = (age_gyr / 4.5) ** (-1.5)
@@ -296,7 +313,7 @@ def estimate_uv_flux(
     produced abiotically via photolysis.
     """
     R_star_m = star_radius * R_SUN
-    a_m = semi_major_axis * AU
+    a_m = max(semi_major_axis, 1e-6) * AU
 
     L_bol = 4 * np.pi * R_star_m**2 * STEFAN_BOLTZMANN * star_teff**4
     t_norm = np.clip((star_teff - 2500) / (10000 - 2500), 0.0, 1.0)

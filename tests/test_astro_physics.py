@@ -9,7 +9,7 @@ from modules.astro_physics import (
     compute_sephi,
     equilibrium_temperature,
     estimate_density,
-    estimate_escape_veloócity,
+    estimate_escape_velocity,
     estimate_isa_interaction,
     estimate_outgassing_rate,
     estimate_uv_flux,
