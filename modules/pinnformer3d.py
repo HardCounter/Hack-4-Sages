@@ -273,7 +273,8 @@ if _HAS_TORCH:
             lambda_pde = cfg.lambda_pde
 
         x_colloc = x_colloc.requires_grad_(True)
-        out = model(x_colloc)
+        with sdpa_kernel(_MATH_ONLY):
+            out = model(x_colloc)
         losses: Dict[str, torch.Tensor] = {}
 
         # Parse output fields
@@ -342,7 +343,8 @@ if _HAS_TORCH:
             )
 
         # ── Boundary conditions ──
-        out_bc = model(x_bc)
+        with sdpa_kernel(_MATH_ONLY):
+            out_bc = model(x_bc)
         bc_idx = 0
         L_bc = torch.mean((out_bc[:, bc_idx] - bc_targets["T_atm"])**2)
         bc_idx += 1
@@ -487,7 +489,7 @@ if _HAS_TORCH:
                         f"L_total={total.item():.4e}  "
                         f"L_bc={l_bc.item():.4e}  "
                         f"L_pde={l_pde.item():.4e}  "
-                        f"T∈[{t_min:.1f}, {t_max:.1f}]  "
+                                        f"T_in_[{t_min:.1f}, {t_max:.1f}]  "
                         f"lr={cur_lr:.2e}"
                     )
 
@@ -504,7 +506,7 @@ if _HAS_TORCH:
         )
         if verbose:
             v = history.validation
-            print("\n── Validation (fresh 4 096-point grid) ──")
+            print("\nValidation (fresh 4 096-point grid)")
             print(f"   PDE residual  RMSE : {v['pde_residual_rmse']:.4e}")
             print(f"   PDE residual  max  : {v['pde_residual_max']:.4e}")
             print(f"   Pred T  mean/min/max : "

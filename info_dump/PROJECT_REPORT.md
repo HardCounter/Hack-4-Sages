@@ -3,7 +3,7 @@
 > **Repository:** Hack-4-Sages  
 > **Context:** HACK-4-SAGES hackathon (72-hour sprint)  
 > **Stack:** Python 3.10+ / Streamlit / Ollama / LangChain / scikit-elm / CTGAN / Plotly  
-> **Generated:** 2026-03-11
+> **Generated:** 2026-03-11 (updated with extended model evaluation and tests)
 
 ---
 
@@ -51,7 +51,7 @@ The **Autonomous Exoplanetary Digital Twin** is a browser-based climate-surrogat
 > **Scope & Non-Goals**
 > - The ELM ensemble and analytical models are trained on analytically generated data, **not** calibrated against ROCKE-3D or ExoCAM. Outputs are hypothesis-generating approximations.
 > - PINNFormer 3D is an **experimental** PDE surrogate, not a production GCM replacement.
-> - No time-evolving atmosphere, cloud feedback, or ocean heat transport is modeled yet.
+> - No time-evolving atmosphere is modeled; ocean heat transport and cloud feedback appear only as low-order parameterisations in specific PINNFormer modes, not as full GCMs.
 > - The system does not implement bidirectional data assimilation and is therefore a *digital-twin-inspired* surrogate, not a classical digital twin.
 > - A small set of precomputed GCM benchmark cases is included for qualitative comparison only.
 > - See `info_dump/judge_critique_response.md` for a full critique-response log.
@@ -80,8 +80,8 @@ The **Autonomous Exoplanetary Digital Twin** is a browser-based climate-surrogat
 
 ```
 Hack-4-Sages/
-├── app.py                          # Main Streamlit application (751 lines)
-├── train_models.py                 # CLI for training ELM, CTGAN, PINNFormer (218 lines)
+├── app.py                          # Main Streamlit application (1739 lines)
+├── train_models.py                 # CLI for training ELM, CTGAN, PINNFormer (306 lines)
 ├── requirements.txt                # Python dependencies (23 packages)
 ├── Dockerfile                      # Container build (python:3.11-slim)
 ├── Modelfile.astro                 # Ollama custom model definition
@@ -91,29 +91,36 @@ Hack-4-Sages/
 ├── lead-judge.md                   # Judge-specific targeting notes
 ├── .gitignore
 │
-├── modules/                        # Core Python modules (14 files)
+├── modules/                        # Core Python modules
 │   ├── __init__.py
-│   ├── agent_setup.py              # LangChain dual-model agent (439 lines)
-│   ├── anomaly_detection.py        # Isolation Forest + UMAP (133 lines)
-│   ├── astro_physics.py            # Physics calculations (429 lines)
-│   ├── data_augmentation.py        # CTGAN wrapper (124 lines)
-│   ├── degradation.py              # Graceful degradation (123 lines)
-│   ├── elm_surrogate.py            # ELM ensemble climate model (331 lines)
-│   ├── llm_helpers.py              # Ollama helper functions (226 lines)
-│   ├── nasa_client.py              # NASA TAP client (131 lines)
-│   ├── pinn_heat.py                # DeepXDE 1D PINN (76 lines)
-│   ├── pinnformer3d.py             # PyTorch transformer PINN (239 lines)
-│   ├── rag_citations.py            # Hybrid RAG + ChromaDB (1404 lines)
-│   ├── validators.py               # Pydantic models (122 lines)
-│   └── visualization.py            # Plotly 3D/2D renderers (297 lines)
+│   ├── agent_setup.py              # LangChain dual-model agent (555 lines)
+│   ├── anomaly_detection.py        # Isolation Forest + UMAP (259 lines)
+│   ├── astro_physics.py            # Physics calculations (805 lines)
+│   ├── combined_catalog.py         # Combined NASA/EU/DACE exoplanet catalog (237 lines)
+│   ├── data_augmentation.py        # CTGAN wrapper (248 lines)
+│   ├── degradation.py              # Graceful degradation (193 lines)
+│   ├── elm_surrogate.py            # ELM ensemble climate model (644 lines)
+│   ├── gcm_benchmarks.py           # Synthetic GCM benchmark maps (153 lines)
+│   ├── llm_helpers.py              # Ollama helper functions (256 lines)
+│   ├── model_evaluation.py         # Model diagnostics for ELM/CTGAN/PINN (173 lines)
+│   ├── nasa_client.py              # NASA TAP client (130 lines)
+│   ├── old-vis.py                  # Legacy visualisation prototypes (293 lines)
+│   ├── pinn_heat.py                # DeepXDE 1D PINN (154 lines)
+│   ├── pinnformer3d.py             # PyTorch transformer PINN (692 lines)
+│   ├── rag_citations.py            # Hybrid RAG + ChromaDB (1403 lines)
+│   ├── validators.py               # Pydantic models (177 lines)
+│   └── visualization.py            # Plotly 3D/2D renderers (336 lines)
 │
-├── tests/                          # Pytest test suite (72 tests)
+├── tests/                          # Pytest test suite (dozens of targeted checks)
 │   ├── __init__.py
-│   ├── test_astro_physics.py       # Physics function tests (131 lines)
-│   ├── test_elm_surrogate.py       # ELM surrogate tests (74 lines)
-│   ├── test_pinnformer3d.py        # PINNFormer tests (101 lines)
-│   ├── test_rag_citations.py       # RAG citation tests (231 lines)
-│   └── test_validators.py          # Pydantic validator tests (56 lines)
+│   ├── test_astro_physics.py       # Physics function tests (243 lines)
+│   ├── test_ctgan_physics.py       # CTGAN physical filters and stats (52 lines)
+│   ├── test_degradation_and_modes.py  # Degradation + agent mode smoke tests (89 lines)
+│   ├── test_elm_gcm_evaluation.py  # ELM vs GCM benchmark evaluation (45 lines)
+│   ├── test_elm_surrogate.py       # ELM surrogate tests (73 lines)
+│   ├── test_pinn_validation.py     # PINNFormer physics validation (38 lines)
+│   ├── test_rag_citations.py       # RAG citation tests (230 lines)
+│   └── test_validators.py          # Pydantic validator tests (114 lines)
 │
 ├── diagnostic/                     # Post-training diagnostic scripts
 │   ├── diagnose_ctgan.py           # CTGAN real vs synthetic comparison
@@ -159,7 +166,7 @@ Hack-4-Sages/
     └── gemini_deep/                # Gemini-generated deep-dive PDFs (5 files)
 ```
 
-**Codebase size:** ~5,500 lines of Python across 25 files (14 modules, 5 test files, 3 diagnostics, 2 entry points, 1 init).
+**Codebase size:** ~7,000 lines of Python across 30+ files (modules, tests, diagnostics, entry points, and helpers).
 
 ---
 
@@ -388,27 +395,40 @@ Supports both `skelm` (optimized C library) and pure NumPy fallback.
 
 ### 5.7 PINNFormer 3D (`pinnformer3d.py`)
 
-**Lines:** 239 | **Role:** Experimental physics-informed climate model
+**Lines:** 692 | **Role:** Experimental physics-informed climate model with configurable physics modes
 
-A transformer-based Physics-Informed Neural Network solving the steady-state heat equation on a tidally locked planet:
+`PINNFormer3D` is a transformer-based Physics-Informed Neural Network solving a coupled steady-state energy-balance system on a (typically tidally locked) exoplanet with selectable physics terms. The atmospheric PDE in the most general mode is:
 
-**PDE:** κ ∇²T + S(θ, φ) − σ T⁴ = 0
+κ\_atm ∇²T + S(θ, φ)·(1 − α\_eff) − (1 − G)·σ T⁴ + F\_oht + Q\_tidal + v̄·∇T = 0,
+
+with optional ocean mixed-layer, cloud, ice-albedo, greenhouse, tidal, and advection contributions controlled via `PINNPhysicsConfig`.
+
+**Physics modules (modes):**
+- `basic` — bare heat equation with fixed albedo.
+- `greenhouse` — effective emission factor (optical depth G).
+- `oht` — ocean mixed-layer PDE coupling (Hu & Yang 2014-inspired).
+- `clouds` — temperature-dependent cloud fraction and albedo change (Yang et al. 2013-style constraint).
+- `tidal` — additive internal tidal heating term (Driscoll & Barnes 2015).
+- `ice_albedo` — ice fraction field feeding back into surface albedo.
+- `advection` — mean zonal wind v̄·∂T/∂φ representing large-scale circulation (Showman & Polvani 2011).
+- `oht_clouds` / `full` — combinations of the above, with `full` enabling all modules.
 
 **Architecture:**
-- `WaveletPositionalEncoding`: Multi-frequency sinusoidal encoding of spherical coordinates
-- `PINNFormer3D`: PyTorch `nn.TransformerEncoder` with 4 heads, 3 layers, d_model=128
-- Input: (θ, φ, z) — latitude, longitude, depth
-- Output: Temperature T
+- `WaveletPositionalEncoding`: multi-frequency sinusoidal encoding of (θ, φ, z).
+- `PINNFormer3D`: PyTorch `nn.TransformerEncoder` (configurable depth and width; default d\_model=128, 4 heads, 4 layers) with multiple scalar output heads for atmospheric temperature, optional ocean temperature, cloud fraction, and ice fraction.
+- Input: (θ, φ, z) — latitude, longitude, depth (non-dimensional).
+- Output: 1–4 fields depending on physics mode.
 
-**Training:**
-- Collocation points sampled on the sphere
-- Loss = PDE residual + boundary condition penalties
-- Uses `sdpa_kernel(SDPBackend.MATH)` for second-order autograd compatibility
+**Training and validation:**
+- Collocation points on the sphere for PDE residuals + dedicated boundary-condition points at the substellar and antistellar points.
+- Loss = boundary-condition MSE + weighted sum of atmospheric, ocean, cloud, and ice residuals.
+- Uses `sdpa_kernel(SDPBackend.MATH)` so higher-order autograd remains valid for Laplacian computation on GPUs.
+- `train_pinnformer()` returns both the trained model and a `TrainingHistory` object; `_compute_validation_stats()` evaluates PDE residual RMSE/max and summary T statistics on a fresh grid.
 
-**Key functions:**
-- `train_pinnformer()`: Full training loop
-- `sample_surface_map()`: Generate 2D temperature map from trained model
-- `save_pinnformer()` / `load_pinnformer()`: Weight persistence
+**Sampling helpers:**
+- `sample_surface_map()` — 2D atmospheric temperature map.
+- `sample_ocean_map()` — 2D ocean mixed-layer temperature (when enabled).
+- `sample_cloud_map()` / `sample_ice_map()` — diagnostic cloud and ice-fraction fields.
 
 Falls back to stub functions if PyTorch is not installed.
 
@@ -420,19 +440,31 @@ Uses DeepXDE to solve κ T'' + S(x) − σ T⁴ = 0 along the terminator (day-ni
 
 ### 5.9 CTGAN Data Augmentation (`data_augmentation.py`)
 
-**Lines:** 124 | **Role:** Synthetic habitable planet generation
+**Lines:** 248 | **Role:** Synthetic habitable planet generation
 
 Wraps the CTGAN library to generate synthetic exoplanets, targeting class imbalance in habitable-zone candidates (which are rare in the real catalog).
 
 **Pipeline:**
-1. `prepare_data()` — Select and clean columns from NASA catalog
-2. `train()` — Train CTGAN with mode-specific normalization
-3. `generate_synthetic_planets()` — Sample synthetic rows
-4. `validate_synthetic_data()` — Compare distributions (real vs synthetic)
+1. `prepare_data()` / `prepare_normalised_data()` — Select, clean, and normalise catalog columns; define a binary habitable label.
+2. `train()` — Train CTGAN with log-transformed, right-skewed physical quantities (e.g., mass, semi-major axis) for better modelling.
+3. `generate_synthetic_planets()` — Conditional sampling on the habitable label.
+4. `validate_synthetic_data()` — Strict physical post-filtering: removes NaNs and out-of-bounds radii, masses, instellations, equilibrium temperatures, and stellar parameters, then clips to the 1st–99th percentile per column.
 
-Trained model saved as `models/ctgan_exoplanets.pkl`.
+Trained model saved as `models/ctgan_exoplanets.pkl`, with a custom unpickler to remap CUDA storages when loading on CPU-only machines.
 
-### 5.10 Anomaly Detection (`anomaly_detection.py`)
+### 5.10 Model Evaluation (`model_evaluation.py`)
+
+**Lines:** 173 | **Role:** Shared diagnostics for ELM, CTGAN, and PINN
+
+Centralises lightweight, physics-aware evaluation logic:
+
+- `evaluate_elm_against_gcm()` — runs the ELM ensemble against the three synthetic GCM benchmarks (`earth_like`, `proxima_b`, `hot_rock`) via `compare_surrogate_to_gcm`, returning pattern correlation, RMSE, bias, and zonal-mean RMSE for each case.
+- `summarise_ctgan_statistics()` — given a real catalog and a post-filtered CTGAN synthetic catalog, computes means/standard deviations for key physical columns plus the maximum element-wise difference between their correlation matrices.
+- `summarise_pinn_history()` — converts the `TrainingHistory.validation` dict into a typed `PinnSummary` dataclass with PDE residual RMSE/max and T statistics, suitable for JSON export and pytest assertions.
+
+These functions are designed to be deterministic, fast, and callable from both `train_models.py` and the pytest suite.
+
+### 5.11 Anomaly Detection (`anomaly_detection.py`)
 
 **Lines:** 133 | **Role:** Identify unusual exoplanets
 
@@ -446,7 +478,7 @@ Trained model saved as `models/ctgan_exoplanets.pkl`.
 
 Anomalous planets may represent: rare habitable candidates, data quality issues, or genuinely unusual systems.
 
-### 5.11 RAG Citations (`rag_citations.py`)
+### 5.12 RAG Citations (`rag_citations.py`)
 
 **Lines:** 1404 | **Role:** Hybrid literature retrieval and citation
 
@@ -485,7 +517,7 @@ Indexes 40 peer-reviewed papers in a persistent ChromaDB vector store (`data/chr
 - `_hybrid_search(query, n_results, topics)` → Reciprocal Rank Fusion of semantic + keyword
 - `_fallback_keyword_search(query, n_results, topics)` → TF-IDF weighted fallback
 
-### 5.12 Visualization (`visualization.py`)
+### 5.13 Visualization (`visualization.py`)
 
 **Lines:** 297 | **Role:** Plotly-based scientific visualizations
 
@@ -500,7 +532,7 @@ Uses a custom `SCIENCE_COLORSCALE` (blue → cyan → green → yellow → orang
 
 The 3D globe maps temperature data onto a spherical surface using spherical coordinate transforms, with mesh lighting and a dark cosmic background.
 
-### 5.13 Validators (`validators.py`)
+### 5.14 Validators (`validators.py`)
 
 **Lines:** 122 | **Role:** Pydantic physics guardrails
 
@@ -525,7 +557,7 @@ Three Pydantic models enforce physical constraints:
 
 These prevent physically impossible inputs from propagating through the pipeline.
 
-### 5.14 Graceful Degradation (`degradation.py`)
+### 5.15 Graceful Degradation (`degradation.py`)
 
 **Lines:** 123 | **Role:** Fault tolerance
 
@@ -538,9 +570,9 @@ These prevent physically impossible inputs from propagating through the pipeline
 
 Also includes `validate_temperature_map()` to reject maps with NaN, infinite values, or physically unreasonable temperatures (< 2.7 K CMB floor or > 5000 K).
 
-### 5.15 Model Training (`train_models.py`)
+### 5.16 Model Training (`train_models.py`)
 
-**Lines:** 218 | **Role:** CLI training entry point
+**Lines:** 306 | **Role:** CLI training entry point
 
 ```bash
 python train_models.py                    # ELM only (~5 seconds)
@@ -821,15 +853,18 @@ SYSTEM """You are AstroAgent, an expert astrophysics assistant..."""
 
 ## 11. Testing
 
-**Framework:** pytest | **Total tests:** 72
+**Framework:** pytest | **Scope:** dozens of unit and slow-integration tests
 
-| Test File | Tests | Coverage |
-|---|---|---|
-| `test_astro_physics.py` | ~15 | T_eq, flux, ESI, SEPHI, density, v_esc, HZ, HSF, ISA, false positives |
-| `test_elm_surrogate.py` | ~10 | PureELM, ELMEnsemble, analytical data, surrogate train/predict, conformal |
-| `test_pinnformer3d.py` | ~8 | Forward pass, loss, short training, surface map (skip if no PyTorch) |
-| `test_rag_citations.py` | ~34 | Corpus integrity (40 papers, required fields, unique IDs, topics, key_findings), tokenisation, TF-IDF scoring, fallback search (results, ranking, topic filter), topic filtering (single, multi, domain coverage), composite documents, citation formatting, public API (n_results, topic restriction), domain coverage (atmospheric escape, JWST, clouds, carbonate-silicate, OHT) |
-| `test_validators.py` | ~5 | Valid/invalid inputs, mass-radius consistency |
+| Test File | Focus |
+|---|---|
+| `test_astro_physics.py` | T_eq, flux, ESI, SEPHI, density, v_esc, HZ, HSF, ISA, outgassing, UV flux, atmospheric escape, false positives |
+| `test_elm_surrogate.py` | PureELM, ELMEnsemble, analytical data generator, surrogate train/predict, conformal intervals |
+| `test_elm_gcm_evaluation.py` | ELM ensemble vs synthetic GCM benchmarks (Earth-like, Proxima b, hot rock); pattern correlation and RMSE thresholds |
+| `test_ctgan_physics.py` | Physical post-filters for CTGAN output and finite statistics from `summarise_ctgan_statistics` |
+| `test_pinn_validation.py` | Short CPU-only PINNFormer training, validation metric finiteness, surface map sanity, habitable surface fraction bounds |
+| `test_degradation_and_modes.py` | GracefulDegradation behaviour and agent-mode smoke tests |
+| `test_rag_citations.py` | Corpus integrity (40 papers), hybrid search ranking, topic filtering, citation formatting, public API behaviour |
+| `test_validators.py` | Pydantic validators for stellar/planetary parameters and mass-radius consistency |
 
 ---
 
@@ -904,7 +939,7 @@ Full dependency list from `requirements.txt`:
 ```
 streamlit==1.41.0
 pandas==2.2.3
-numpy>=2.1.0
+numpy>=1.23.3,<2
 plotly==5.24.1
 requests==2.32.3
 pydantic==2.10.3

@@ -72,7 +72,7 @@ def train_elm(n_samples: int = 5000, n_ensemble: int = 10, n_neurons: int = 500)
 
     path = os.path.join(MODELS_DIR, "elm_ensemble.pkl")
     model.save(path)
-    print(f"  Saved → {path}")
+    print(f"  Saved -> {path}")
 
     # Quick sanity check — predict Proxima Centauri b
     params = {
@@ -162,11 +162,11 @@ def train_ctgan(epochs: int = 1000):
 
     synth = aug.generate_synthetic_planets(n_samples=500000)
     valid = aug.validate_synthetic_data(synth)
-    print(f"  Generated {len(synth)} → {len(valid)} physically valid synthetics")
+    print(f"  Generated {len(synth)} -> {len(valid)} physically valid synthetics")
 
     path = os.path.join(MODELS_DIR, "ctgan_exoplanets.pkl")
     aug.save_model(path)
-    print(f"  Saved → {path}")
+    print(f"  Saved -> {path}")
 
 
 # ── 3. PINNFormer 3-D ────────────────────────────────────────────────────────
@@ -185,7 +185,7 @@ def train_pinn(epochs: int = 5000, n_colloc: int = 8192, mode: str = "basic"):
     print(f"{'='*60}")
     print(f"  Mode   : {mode}")
     print(f"  Physics: {cfg.summary()}")
-    print(f"  Fields : {cfg.n_output_fields} → {', '.join(cfg.field_names)}")
+    print(f"  Fields : {cfg.n_output_fields} -> {', '.join(cfg.field_names)}")
 
     import torch
     device = "cuda" if torch.cuda.is_available() else "cpu"
@@ -215,7 +215,7 @@ def train_pinn(epochs: int = 5000, n_colloc: int = 8192, mode: str = "basic"):
 
     path = os.path.join(MODELS_DIR, "pinn3d_weights.pt")
     save_pinnformer(model, path, cfg=cfg)
-    print(f"  Saved → {path}")
+    print(f"  Saved -> {path}")
 
 
 # ── CLI ───────────────────────────────────────────────────────────────────────
