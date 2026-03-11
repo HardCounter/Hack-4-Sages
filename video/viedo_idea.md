@@ -6,3 +6,8 @@ ideas:
 
 idea of the project: 
 create highly efficient and easy accessible system for discovering egzoplanets and astronomy, as well as advanced and efficient scientist assisant that can help them analyse exopalents quickly, currently there are many programs for discovering and exploring new exoplanets (james web telescope, PLATO, etc.) and GCM are time consuming, there is need for tool that can do analysis fast and maybe help choose potencial candiates for GCM simulation
+
+criteria: 
+- judges are phD scienttic in those areas so it must be very scientific, technical, precise
+- we have juding criteria so allign video to fulfill them 
+- 
