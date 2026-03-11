@@ -95,8 +95,10 @@ def run_simulation_pipeline(params: dict) -> dict:
         elm_prediction, analytical_fallback, timeout=5.0, label="ELM Surrogate"
     )
 
+    _ICON_NO = "⬡"  # U+2B21 — change here to update this module's icon
+    _ICON_WARN = '<span style="color:#ff4b4b">⬢</span>'  # U+2B22 — warning (slider red)
     if not gd.validate_temperature_map(temp_map):
-        st.error("\u274c Temperature map unphysical. Falling back to algebraic model.")
+        st.error(f"{_ICON_NO} Temperature map unphysical. Falling back to algebraic model.")
         temp_map = analytical_fallback()
 
     # L3: 3-D → fallback to 2-D
