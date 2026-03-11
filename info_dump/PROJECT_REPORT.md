@@ -60,7 +60,7 @@ The **Autonomous Exoplanetary Digital Twin** is a browser-based application that
 | Physics-informed modeling | PINNFormer 3D (transformer-based PINN) |
 | Data augmentation | CTGAN for habitable planet oversampling |
 | Anomaly detection | Isolation Forest + UMAP visualization |
-| Scientific citations | RAG over 15 astrophysics papers (ChromaDB) |
+| Scientific citations | Hybrid RAG over 40 peer-reviewed papers (ChromaDB + TF-IDF RRF) |
 | Natural language interface | Dual-model LangChain agent (Qwen 2.5 + astro-agent) |
 | 3D visualization | Plotly globe with temperature mapping |
 | Input validation | Pydantic physics guardrails |
@@ -85,7 +85,7 @@ Hack-4-Sages/
 │
 ├── modules/                        # Core Python modules (14 files)
 │   ├── __init__.py
-│   ├── agent_setup.py              # LangChain dual-model agent (391 lines)
+│   ├── agent_setup.py              # LangChain dual-model agent (439 lines)
 │   ├── anomaly_detection.py        # Isolation Forest + UMAP (133 lines)
 │   ├── astro_physics.py            # Physics calculations (429 lines)
 │   ├── data_augmentation.py        # CTGAN wrapper (124 lines)
@@ -95,16 +95,16 @@ Hack-4-Sages/
 │   ├── nasa_client.py              # NASA TAP client (131 lines)
 │   ├── pinn_heat.py                # DeepXDE 1D PINN (76 lines)
 │   ├── pinnformer3d.py             # PyTorch transformer PINN (239 lines)
-│   ├── rag_citations.py            # RAG + ChromaDB (318 lines)
+│   ├── rag_citations.py            # Hybrid RAG + ChromaDB (1404 lines)
 │   ├── validators.py               # Pydantic models (122 lines)
 │   └── visualization.py            # Plotly 3D/2D renderers (297 lines)
 │
-├── tests/                          # Pytest test suite (43 tests)
+├── tests/                          # Pytest test suite (72 tests)
 │   ├── __init__.py
 │   ├── test_astro_physics.py       # Physics function tests (131 lines)
 │   ├── test_elm_surrogate.py       # ELM surrogate tests (74 lines)
 │   ├── test_pinnformer3d.py        # PINNFormer tests (101 lines)
-│   ├── test_rag_citations.py       # RAG citation tests (45 lines)
+│   ├── test_rag_citations.py       # RAG citation tests (231 lines)
 │   └── test_validators.py          # Pydantic validator tests (56 lines)
 │
 ├── diagnostic/                     # Post-training diagnostic scripts
@@ -125,8 +125,10 @@ Hack-4-Sages/
 │   ├── pinn3d_weights.pt           # PINNFormer weights (PyTorch)
 │   └── .gitkeep
 │
-├── data/nasa_cache/                # Cached NASA query results
-│   └── .gitkeep
+├── data/
+│   ├── nasa_cache/                 # Cached NASA query results
+│   │   └── .gitkeep
+│   └── chroma_db/                  # Persistent ChromaDB vector store (auto-generated, gitignored)
 │
 ├── notebooks/                      # Jupyter notebooks (placeholder)
 │   └── .gitkeep
@@ -149,7 +151,7 @@ Hack-4-Sages/
     └── gemini_deep/                # Gemini-generated deep-dive PDFs (5 files)
 ```
 
-**Codebase size:** ~4,400 lines of Python across 25 files (14 modules, 5 test files, 3 diagnostics, 2 entry points, 1 init).
+**Codebase size:** ~5,500 lines of Python across 25 files (14 modules, 5 test files, 3 diagnostics, 2 entry points, 1 init).
 
 ---
 
@@ -197,7 +199,7 @@ The system follows a layered architecture with five distinct layers:
 │                    DATA LAYER                                │
 │  ┌─────────────────┐  ┌──────────────┐  ┌────────────────┐  │
 │  │ NASA Exoplanet  │  │ ChromaDB     │  │ Local Model    │  │
-│  │ Archive (TAP)   │  │ (15 papers)  │  │ Storage (.pkl) │  │
+│  │ Archive (TAP)   │  │ (40 papers)  │  │ Storage (.pkl) │  │
 │  └─────────────────┘  └──────────────┘  └────────────────┘  │
 └─────────────────────────────────────────────────────────────┘
 ```
@@ -238,7 +240,7 @@ The orchestrator always consults the domain expert after computing metrics — r
 | Numerics | NumPy | ≥2.1.0 | Array operations |
 | Scientific Computing | SciPy | 1.14.1 | Interpolation, audio generation |
 | NetCDF | netCDF4 | 1.7.2 | Climate data format support |
-| Testing | pytest | ≥7.0.0 | 43 test cases |
+| Testing | pytest | ≥7.0.0 | 72 test cases |
 
 ---
 
@@ -294,7 +296,7 @@ This is the scientific backbone of the project, implementing peer-reviewed formu
 
 ### 5.3 LLM Agent System (`agent_setup.py`)
 
-**Lines:** 391 | **Role:** LangChain agent with 8 tools
+**Lines:** 439 | **Role:** LangChain agent with 8 tools
 
 Uses `create_tool_calling_agent` with a ReAct-style loop (max 10 iterations). Both LLMs connect to Ollama at `http://localhost:11434`.
 
@@ -309,7 +311,7 @@ Uses `create_tool_calling_agent` with a ReAct-style loop (max 10 iterations). Bo
 | `discover_most_habitable` | NASA → rank by ESI → expert evaluation | Yes (3 steps) |
 | `compare_two_planets` | Fetch 2 planets → compute → expert comparison | Yes (3 steps) |
 | `detect_anomalous_planets` | NASA → Isolation Forest → top anomalies | Yes (2 steps) |
-| `cite_scientific_literature` | ChromaDB RAG → formatted references | No |
+| `cite_scientific_literature` | Hybrid RAG (semantic + TF-IDF RRF) → 40-paper corpus → formatted references with key findings; accepts optional topic filter tags | No |
 
 **System prompt enforces a procedure:**
 1. Fetch data from NASA first
@@ -317,6 +319,8 @@ Uses `create_tool_calling_agent` with a ReAct-style loop (max 10 iterations). Bo
 3. Always consult domain expert (never present raw numbers)
 4. Run climate simulation if requested
 5. Synthesize into a clear answer
+
+**Citation policy (new):** The system prompt includes a dedicated CITATION POLICY section requiring the agent to always cite after habitability analysis, use topic-specific queries, include 2-3 citations per substantive claim, and cross-reference false-positive literature when discussing biosignatures.
 
 ### 5.4 LLM Helpers (`llm_helpers.py`)
 
@@ -436,17 +440,42 @@ Anomalous planets may represent: rare habitable candidates, data quality issues,
 
 ### 5.11 RAG Citations (`rag_citations.py`)
 
-**Lines:** 318 | **Role:** Literature retrieval and citation
+**Lines:** 1404 | **Role:** Hybrid literature retrieval and citation
 
-Indexes 15 peer-reviewed papers in a ChromaDB vector store using `all-MiniLM-L6-v2` sentence embeddings.
+Indexes 40 peer-reviewed papers in a persistent ChromaDB vector store (`data/chroma_db`) using `all-MiniLM-L6-v2` sentence embeddings over composite documents (abstract + key findings).
 
-**Paper coverage:** Kasting 1993, Schulze-Makuch 2011, Kopparapu 2013, Pierrehumbert 2011, Turbet 2016, Wordsworth 2015, Shields 2016, Meadows 2018, Leconte 2013, Luger & Barnes 2015, Chen & Kipping 2017, Huang 2006, Liu 2008, Seager 2016, Rodríguez-Mozos 2017.
+**Search architecture:** Hybrid retrieval combining:
+1. ChromaDB semantic search (sentence-transformer cosine similarity)
+2. TF-IDF weighted keyword search (IDF with stop-word removal)
+3. Reciprocal Rank Fusion (Cormack et al. 2009, k=60) to merge rankings
 
-**Fallback:** If ChromaDB is unavailable, uses keyword overlap (TF-IDF-like) matching.
+**Paper coverage (40 papers across 6 domains):**
 
-Functions:
-- `cite_literature(query, n_results)` → List of matching papers with metadata
+| Domain | Papers | Example Authors |
+|---|---|---|
+| HZ & Habitability Metrics (4) | HZ boundaries, ESI, SEPHI | Kopparapu 2013, Schulze-Makuch 2011, Kasting 1993, Rodríguez-Mozos 2017 |
+| Tidal Locking & Climate States (5) | Eyeball/lobster states, atmospheric collapse, GCM | Turbet 2016, Shields 2016, Leconte 2013, Pierrehumbert 2011, Wordsworth 2015 |
+| Biosignatures & False Positives (5) | O₂/CH₄ false positives, biosignature framework | Meadows 2018, Seager 2016, Luger 2015, Schwieterman 2018, Catling 2018 |
+| Atmospheric Science (5) | Escape, runaway greenhouse, cosmic shoreline, clouds | Owen & Wu 2013, Goldblatt 2013, Zahnle & Catling 2017, Tian 2015, Wolf & Toon 2015 |
+| Planetary Interiors (5) | Mass-radius, plate tectonics, tidal heating, outgassing | Chen & Kipping 2017, Kite 2009, Zeng 2019, Stamenković 2012, Walker 1981, Driscoll & Barnes 2015 |
+| Stellar Context (4) | M-dwarf UV, flares, pre-MS HZ | Lammer 2009, Ramirez & Kaltenegger 2014, Segura 2010, France 2013 |
+| Observational / JWST (4) | K2-18 b, LHS 475 b, TRAPPIST-1 b | Madhusudhan 2023, Lustig-Yaeger 2023, Greene 2023, Benneke 2019 |
+| Climate Modeling (4) | Cloud feedback, OHT, ROCKE-3D | Yang 2013, Hu & Yang 2014, Joshi 1997, Del Genio 2019 |
+| Astrobiology (4) | Habitability definition, photosynthesis limits | Cockell 2016, Raven & Cockell 2006, Petkowski 2020 |
+
+**Per-paper schema (8 fields):** `id`, `title`, `authors`, `year`, `journal`, `abstract` (100–180 words with numerical results), `topics` (list of domain tags), `key_findings` (2–4 quantitative bullet points).
+
+**Topic filtering:** Optional `topics` parameter on `cite_literature()` filters papers matching any requested tag (union semantics). Available tags include: `habitable_zone`, `m_dwarf`, `tidal_locking`, `biosignatures`, `false_positives`, `atmospheric_escape`, `climate_modeling`, `gcm`, `cloud_feedback`, `ocean_heat_transport`, `planetary_interior`, `plate_tectonics`, `mass_radius`, `stellar_activity`, `uv_environment`, `jwst`, `transit_spectroscopy`, `astrobiology`, `photosynthesis`.
+
+**Persistent ChromaDB:** Uses `PersistentClient(path="data/chroma_db")` instead of in-memory. Auto-re-seeds when `collection.count() != len(_PAPERS)` (handles corpus expansions).
+
+**Fallback:** If ChromaDB/sentence-transformers are unavailable, falls back to TF-IDF keyword search with log-weighted IDF and stop-word removal.
+
+**Functions:**
+- `cite_literature(query, n_results=5, topics=None)` → List of matching papers with metadata + key_findings
 - `format_citations_markdown(citations)` → Formatted reference list
+- `_hybrid_search(query, n_results, topics)` → Reciprocal Rank Fusion of semantic + keyword
+- `_fallback_keyword_search(query, n_results, topics)` → TF-IDF weighted fallback
 
 ### 5.12 Visualization (`visualization.py`)
 
@@ -541,7 +570,7 @@ Qwen 2.5 (orchestrator) ──► Decides tool sequence
     │
     ├──► consult_domain_expert(metrics) ──► astro-agent ──► interpretation
     │
-    ├──► cite_scientific_literature(topic) ──► ChromaDB RAG ──► references
+    ├──► cite_scientific_literature(query, topics) ──► Hybrid RAG (semantic + TF-IDF RRF) ──► 40-paper corpus ──► references + key findings
     │
     └──► Synthesize final answer with citations
 ```
@@ -623,7 +652,7 @@ UV flux estimation with linear spectral-type interpolation. Evaluates abiotic O�
 
 ### 7.8 References
 
-The METHODOLOGY.md file contains 17 peer-reviewed references from journals including ApJ, Astrobiology, MNRAS, A&A, Physics Reports, and JOSS.
+The METHODOLOGY.md file contains 17 peer-reviewed references from journals including ApJ, Astrobiology, MNRAS, A&A, Physics Reports, and JOSS. The RAG citation system indexes an expanded corpus of 40 papers (a superset of the METHODOLOGY references) with extended abstracts and key findings, covering additional domains: atmospheric escape (Owen & Wu 2013, Zahnle & Catling 2017), runaway greenhouse (Goldblatt 2013), cloud feedbacks (Yang 2013, Wolf & Toon 2015), ocean heat transport (Hu & Yang 2014), planetary interiors (Walker 1981, Zeng 2019, Stamenković 2012), tidal heating (Driscoll & Barnes 2015), stellar flares (Segura 2010), M-dwarf UV (France 2013), pre-MS HZ (Ramirez & Kaltenegger 2014), JWST observations (Madhusudhan 2023, Greene 2023, Lustig-Yaeger 2023, Benneke 2019), biosignature framework (Schwieterman 2018, Catling 2018), habitability definition (Cockell 2016), and photosynthesis limits (Raven & Cockell 2006).
 
 ---
 
@@ -676,10 +705,15 @@ The METHODOLOGY.md file contains 17 peer-reviewed references from journals inclu
 
 | Property | Value |
 |---|---|
-| Vector DB | ChromaDB (persistent) |
-| Embeddings | all-MiniLM-L6-v2 (sentence-transformers) |
-| Corpus | 15 peer-reviewed papers |
-| Fallback | Keyword overlap matching |
+| Vector DB | ChromaDB (persistent, `data/chroma_db`) |
+| Embeddings | all-MiniLM-L6-v2 (sentence-transformers, 384-dim) |
+| Corpus | 40 peer-reviewed papers across 6 scientific domains |
+| Per-paper content | Extended abstract (100–180 words) + 2–4 key findings |
+| Search strategy | Hybrid: semantic (ChromaDB) + TF-IDF keyword, fused via Reciprocal Rank Fusion (k=60) |
+| Topic filtering | Optional domain-tag filter (union semantics, ~20 tags) |
+| Default results | 5 (increased from 3) |
+| Fallback | TF-IDF weighted keyword search with IDF + stop-word removal |
+| Domains covered | HZ, tidal locking, biosignatures, atmospheric escape, interiors, stellar context, JWST, climate modeling, astrobiology |
 
 ---
 
@@ -779,14 +813,14 @@ SYSTEM """You are AstroAgent, an expert astrophysics assistant..."""
 
 ## 11. Testing
 
-**Framework:** pytest | **Total tests:** 43
+**Framework:** pytest | **Total tests:** 72
 
 | Test File | Tests | Coverage |
 |---|---|---|
 | `test_astro_physics.py` | ~15 | T_eq, flux, ESI, SEPHI, density, v_esc, HZ, HSF, ISA, false positives |
 | `test_elm_surrogate.py` | ~10 | PureELM, ELMEnsemble, analytical data, surrogate train/predict, conformal |
 | `test_pinnformer3d.py` | ~8 | Forward pass, loss, short training, surface map (skip if no PyTorch) |
-| `test_rag_citations.py` | ~5 | Fallback keyword search, citation formatting, literature retrieval |
+| `test_rag_citations.py` | ~34 | Corpus integrity (40 papers, required fields, unique IDs, topics, key_findings), tokenisation, TF-IDF scoring, fallback search (results, ranking, topic filter), topic filtering (single, multi, domain coverage), composite documents, citation formatting, public API (n_results, topic restriction), domain coverage (atmospheric escape, JWST, clouds, carbonate-silicate, OHT) |
 | `test_validators.py` | ~5 | Valid/invalid inputs, mass-radius consistency |
 
 ---

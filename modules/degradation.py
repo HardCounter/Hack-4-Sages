@@ -55,6 +55,8 @@ class GracefulDegradation:
             return False
         if np.any(np.isnan(temp_map)):
             return False
+        if np.any(np.isinf(temp_map)):
+            return False
         if np.any(temp_map < 0):
             return False
         if np.any(temp_map > 5000):

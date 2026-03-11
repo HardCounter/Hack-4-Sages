@@ -17,7 +17,7 @@ class StellarParameters(BaseModel):
 
     name: str = Field(min_length=1, max_length=100)
     teff: float = Field(
-        ge=2300, le=10000, description="Effective temperature [K]"
+        ge=2000, le=50000, description="Effective temperature [K]"
     )
     radius: float = Field(
         ge=0.08, le=100.0, description="Stellar radius [R_sun]"
@@ -32,9 +32,13 @@ class StellarParameters(BaseModel):
     @field_validator("teff")
     @classmethod
     def validate_teff_physical(cls, v: float) -> float:
-        if v < 2300:
+        if v < 2000:
             raise ValueError(
-                f"T_eff={v}K below brown-dwarf limit (~2300K)"
+                f"T_eff={v}K below hydrogen-burning limit (~2000K)"
+            )
+        if v > 50000:
+            raise ValueError(
+                f"T_eff={v}K exceeds O-type main-sequence upper bound"
             )
         return v
 
@@ -73,7 +77,7 @@ class PlanetaryParameters(BaseModel):
         """Chen & Kipping (2017) empirical mass-radius relation."""
         if self.mass_earth is not None and self.radius_earth is not None:
             if self.radius_earth < 4.0:
-                expected_r = self.mass_earth ** 0.27
+                expected_r = self.mass_earth ** 0.279
                 if expected_r > 0:
                     ratio = self.radius_earth / expected_r
                     if ratio < 0.2 or ratio > 5.0:
