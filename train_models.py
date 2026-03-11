@@ -9,14 +9,18 @@ What it trains
 --------------
 1. ELM ensemble   (~5 seconds on CPU)  → models/elm_ensemble.pkl
 2. CTGAN           (minutes, GPU helps) → models/ctgan_exoplanets.pkl  [optional]
-3. PINNFormer 3-D  (1-2 h on GPU)      → models/pinn3d_weights.pt     [optional]
+3. PINNFormer 3-D  (variable on GPU)    → models/pinn3d_weights.pt     [optional]
 
 Pass flags to control scope:
 
-    python train_models.py                  # ELM only (fast, always safe)
-    python train_models.py --ctgan          # ELM + CTGAN
-    python train_models.py --pinn           # ELM + PINNFormer
-    python train_models.py --ctgan --pinn   # everything
+    python train_models.py                                  # ELM only
+    python train_models.py --pinn                           # ELM + PINN (basic)
+    python train_models.py --pinn --pinn-mode oht_clouds    # ELM + PINN with OHT + clouds
+    python train_models.py --pinn --pinn-mode full          # ELM + PINN with all physics
+    python train_models.py --ctgan --pinn --pinn-mode full  # everything
+
+Available PINN modes: basic, greenhouse, oht, clouds, tidal, ice_albedo,
+                      advection, oht_clouds, full
 """
 
 import argparse
@@ -167,17 +171,23 @@ def train_ctgan(epochs: int = 1000):
 
 # ── 3. PINNFormer 3-D ────────────────────────────────────────────────────────
 
-def train_pinn(epochs: int = 5000, n_colloc: int = 8192):
-    from modules.pinnformer3d import train_pinnformer, save_pinnformer
+def train_pinn(epochs: int = 5000, n_colloc: int = 8192, mode: str = "basic"):
+    from modules.pinnformer3d import (
+        PINNPhysicsConfig,
+        train_pinnformer,
+        save_pinnformer,
+    )
+
+    cfg = PINNPhysicsConfig.from_mode(mode)
 
     print(f"\n{'='*60}")
     print("  PINNFormer 3-D Training")
     print(f"{'='*60}")
+    print(f"  Mode   : {mode}")
+    print(f"  Physics: {cfg.summary()}")
+    print(f"  Fields : {cfg.n_output_fields} → {', '.join(cfg.field_names)}")
 
     import torch
-    # Prefer CUDA for PINN if available; attention math backend
-    # is forced inside pinnformer3d.pinn_loss_3d to support
-    # higher‑order autograd on your GPU.
     device = "cuda" if torch.cuda.is_available() else "cpu"
     print(f"  Device : {device}")
     if device == "cuda":
@@ -191,13 +201,13 @@ def train_pinn(epochs: int = 5000, n_colloc: int = 8192):
 
     t0 = time.time()
     model = train_pinnformer(
-        n_colloc=n_colloc, epochs=epochs, device=device, log_every=500
+        cfg=cfg, n_colloc=n_colloc, epochs=epochs, device=device, log_every=500
     )
     elapsed = time.time() - t0
     print(f"  Training completed in {elapsed/60:.1f} min")
 
     path = os.path.join(MODELS_DIR, "pinn3d_weights.pt")
-    save_pinnformer(model, path)
+    save_pinnformer(model, path, cfg=cfg)
     print(f"  Saved → {path}")
 
 
@@ -235,6 +245,22 @@ def main():
         "--pinn-epochs", type=int, default=5000,
         help="PINNFormer training epochs (default: 5000)"
     )
+    parser.add_argument(
+        "--pinn-mode", type=str, default="basic",
+        choices=[
+            "basic", "greenhouse", "oht", "clouds", "tidal",
+            "ice_albedo", "advection", "oht_clouds", "full",
+        ],
+        help=(
+            "PINNFormer physics mode (default: basic). "
+            "Options: basic, greenhouse, oht, clouds, tidal, "
+            "ice_albedo, advection, oht_clouds, full"
+        ),
+    )
+    parser.add_argument(
+        "--pinn-colloc", type=int, default=8192,
+        help="Number of collocation points for PINN training (default: 8192)"
+    )
     args = parser.parse_args()
 
     ensure_dir()
@@ -250,7 +276,11 @@ def main():
         train_ctgan(epochs=args.ctgan_epochs)
 
     if args.pinn:
-        train_pinn(epochs=args.pinn_epochs)
+        train_pinn(
+            epochs=args.pinn_epochs,
+            n_colloc=args.pinn_colloc,
+            mode=args.pinn_mode,
+        )
 
     print(f"\n{'='*60}")
     print("  All done! Contents of models/:")

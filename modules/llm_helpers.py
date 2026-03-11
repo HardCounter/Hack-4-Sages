@@ -5,24 +5,58 @@ These call Ollama models directly (not through the LangChain agent)
 and are imported by individual app tabs for domain-expert
 interpretation, classification, narration, and query generation.
 
-All public functions are designed to degrade gracefully: if the LLM
-is unreachable they return a short fallback string rather than
-raising.
+All public functions degrade gracefully: if the LLM is unreachable
+they return a short fallback string rather than raising.
+
+The active model names are resolved from ``AgentMode`` so that
+single-LLM mode routes all requests through the domain-expert model
+while dual-LLM mode uses separate models for orchestration vs expertise.
 """
 
 import json
+import logging
 from typing import Dict, Optional
 
-import ollama as _oll
+logger = logging.getLogger(__name__)
+
+try:
+    import ollama as _oll
+    _HAS_OLLAMA = True
+except ImportError:
+    _oll = None
+    _HAS_OLLAMA = False
+    logger.warning("ollama package not installed — LLM helpers will return fallbacks.")
+
+# ─── Model resolution ─────────────────────────────────────────────────────────
+
+_DOMAIN_MODEL = "astrosage"
+_ORCHESTRATOR_MODEL = "qwen2.5:14b"
+_ACTIVE_MODE: str = "dual_llm"
+
+
+def set_llm_mode(mode: str) -> None:
+    """Set the active LLM mode for helper routing.
+
+    Accepted values: ``"dual_llm"``, ``"single_llm"``, ``"deterministic"``.
+    """
+    global _ACTIVE_MODE
+    _ACTIVE_MODE = mode
+    logger.info("LLM helper mode set to %s", mode)
+
+
+def _resolve_orchestrator_model() -> str:
+    if _ACTIVE_MODE == "single_llm":
+        return _DOMAIN_MODEL
+    return _ORCHESTRATOR_MODEL
+
 
 # ─── Low-level callers ────────────────────────────────────────────────────────
 
-_DOMAIN_MODEL = "astro-agent"
-_ORCHESTRATOR_MODEL = "qwen2.5:14b"
-
 
 def _ask_domain(prompt: str) -> str:
-    """Send a single prompt to the astro-agent domain expert."""
+    """Send a single prompt to the AstroSage domain expert."""
+    if not _HAS_OLLAMA:
+        raise ImportError("ollama package not installed")
     resp = _oll.chat(
         model=_DOMAIN_MODEL,
         messages=[{"role": "user", "content": prompt}],
@@ -31,9 +65,12 @@ def _ask_domain(prompt: str) -> str:
 
 
 def _ask_orchestrator(prompt: str) -> str:
-    """Send a single prompt to the Qwen orchestrator."""
+    """Send a single prompt to the orchestrator (or domain model in single-LLM mode)."""
+    if not _HAS_OLLAMA:
+        raise ImportError("ollama package not installed")
+    model = _resolve_orchestrator_model()
     resp = _oll.chat(
-        model=_ORCHESTRATOR_MODEL,
+        model=model,
         messages=[{"role": "user", "content": prompt}],
     )
     return resp["message"]["content"]

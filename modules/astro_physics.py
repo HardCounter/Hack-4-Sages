@@ -3,11 +3,12 @@ Astrophysics calculation engine.
 
 Implements equilibrium temperature, stellar flux, ESI, SEPHI,
 habitable-zone boundaries (Kopparapu 2013), habitable surface
-fraction, and a full analysis pipeline.
+fraction, semi-empirical albedo estimation, atmospheric escape
+diagnostics, and a full analysis pipeline.
 """
 
 import logging
-from typing import Dict, Tuple
+from typing import Dict, Optional, Tuple
 
 import numpy as np
 
@@ -20,6 +21,89 @@ L_SUN = 3.828e26                    # Solar luminosity [W]
 R_SUN = 6.957e8                     # Solar radius [m]
 AU = 1.496e11                       # Astronomical unit [m]
 S_EARTH = 1361.0                    # Solar constant at Earth [W/m²]
+G_GRAV = 6.674e-11                  # Gravitational constant [m³/(kg·s²)]
+M_EARTH_KG = 5.972e24              # Earth mass [kg]
+R_EARTH_M = 6.371e6                # Earth radius [m]
+M_PROTON = 1.673e-27               # Proton mass [kg]
+
+
+# ─── Semi-empirical albedo estimation ─────────────────────────────────────────
+
+_ALBEDO_TABLE: Dict[str, Dict[str, Tuple[float, float]]] = {
+    "ocean":       {"thin": (0.06, 0.03), "temperate": (0.30, 0.06), "thick_cloudy": (0.50, 0.08)},
+    "desert":      {"thin": (0.30, 0.05), "temperate": (0.35, 0.06), "thick_cloudy": (0.55, 0.08)},
+    "ice":         {"thin": (0.60, 0.08), "temperate": (0.55, 0.07), "thick_cloudy": (0.65, 0.08)},
+    "mixed_rocky": {"thin": (0.12, 0.04), "temperate": (0.30, 0.05), "thick_cloudy": (0.45, 0.07)},
+}
+
+
+def estimate_albedo(
+    surface_type: str = "mixed_rocky",
+    atmosphere_type: str = "temperate",
+    user_override: Optional[float] = None,
+) -> Dict[str, float]:
+    """Semi-empirical Bond albedo from surface and atmosphere classes.
+
+    Returns a dict with ``albedo`` (best estimate) and ``albedo_uncertainty``
+    (1-sigma spread). Based on aggregate literature values from Kasting
+    et al. (1993), Shields et al. (2013), and Kopparapu et al. (2013).
+
+    If *user_override* is provided, it is used directly and the uncertainty
+    is set to 0.
+    """
+    if user_override is not None:
+        return {"albedo": float(user_override), "albedo_uncertainty": 0.0}
+    surface_entry = _ALBEDO_TABLE.get(surface_type, _ALBEDO_TABLE["mixed_rocky"])
+    best, sigma = surface_entry.get(atmosphere_type, surface_entry["temperate"])
+    return {"albedo": round(best, 3), "albedo_uncertainty": round(sigma, 3)}
+
+
+# ─── Redistribution factor ───────────────────────────────────────────────────
+
+
+def redistribution_factor(
+    tidally_locked: bool,
+    optical_depth_class: str = "moderate",
+) -> float:
+    """Continuous redistribution factor f for T_eq computation.
+
+    Instead of the binary sqrt(2) vs 2, uses a literature-motivated
+    parameterization spanning tidally locked (hemisphere-only
+    reemission) to fast rotator (uniform redistribution), modulated
+    by a coarse atmospheric optical-depth proxy.
+
+    Optical depth classes:
+      - ``"thin"``:     f_locked ≈ 1.20,  f_fast ≈ 1.85  (weak redistribution)
+      - ``"moderate"``: f_locked ≈ sqrt(2), f_fast ≈ 2.0  (standard, Kasting-like)
+      - ``"thick"``:    f_locked ≈ 1.60,  f_fast ≈ 2.0   (strong circulation narrows gap)
+
+    Motivation: Leconte et al. (2013), Pierrehumbert (2011) — thick atmospheres
+    on tidally locked planets transport heat more efficiently, raising f toward
+    the fast-rotator limit.
+    """
+    _TABLE = {
+        "thin":     (1.20, 1.85),
+        "moderate": (np.sqrt(2), 2.0),
+        "thick":    (1.60, 2.0),
+    }
+    f_locked, f_fast = _TABLE.get(optical_depth_class, _TABLE["moderate"])
+    return float(f_locked if tidally_locked else f_fast)
+
+
+# ─── Orbit-averaged flux correction ──────────────────────────────────────────
+
+
+def orbit_averaged_flux_factor(eccentricity: float) -> float:
+    """Orbit-averaged correction to ⟨1/r²⟩ for eccentric orbits.
+
+    ⟨F⟩ / F(a) = 1 / √(1 − e²)
+
+    For circular orbits (e=0) this returns 1.0. Standard result from
+    celestial mechanics; see Williams & Pollard (2002).
+    """
+    e = np.clip(eccentricity, 0.0, 0.99)
+    return float(1.0 / np.sqrt(1.0 - e**2))
+
 
 # ─── Core functions ───────────────────────────────────────────────────────────
 
@@ -30,21 +114,26 @@ def equilibrium_temperature(
     semi_major_axis: float,
     albedo: float = 0.3,
     tidally_locked: bool = False,
+    eccentricity: float = 0.0,
+    optical_depth_class: str = "moderate",
 ) -> float:
     """Radiative equilibrium temperature [K].
 
-    T_eq = T_* × √(R_* / (f·a)) × (1 − A_B)^{1/4}
+    T_eq = T_* × √(R_* / (f·a)) × (1 − A_B)^{1/4} × ⟨1/r²⟩^{1/4}
 
-    where *f* = √2 for a tidally locked planet (re-emission from one
-    hemisphere) and 2 for a fast rotator.
+    Uses a continuous redistribution factor *f* (see ``redistribution_factor``)
+    and an orbit-averaged flux correction for eccentric orbits
+    (see ``orbit_averaged_flux_factor``).
     """
     R_star_m = stellar_radius * R_SUN
     a_m = max(semi_major_axis, 1e-6) * AU
-    redistribution = np.sqrt(2) if tidally_locked else 2.0
+    f = redistribution_factor(tidally_locked, optical_depth_class)
+    ecc_corr = orbit_averaged_flux_factor(eccentricity) ** 0.25
     T_eq = (
         stellar_temp
-        * np.sqrt(R_star_m / (redistribution * a_m))
+        * np.sqrt(R_star_m / (f * a_m))
         * (1 - albedo) ** 0.25
+        * ecc_corr
     )
     return round(float(T_eq), 2)
 
@@ -53,8 +142,9 @@ def stellar_flux(
     stellar_temp: float,
     stellar_radius: float,
     semi_major_axis: float,
+    eccentricity: float = 0.0,
 ) -> Tuple[float, float]:
-    """Stellar flux on the planet orbit.
+    """Orbit-averaged stellar flux on the planet.
 
     Returns (S_abs [W/m²], S_norm [S_⊕]).
     """
@@ -62,6 +152,7 @@ def stellar_flux(
     a_m = max(semi_major_axis, 1e-6) * AU
     L_star = 4 * np.pi * R_star_m**2 * STEFAN_BOLTZMANN * stellar_temp**4
     S = L_star / (4 * np.pi * a_m**2)
+    S *= orbit_averaged_flux_factor(eccentricity)
     S_norm = S / S_EARTH
     return round(float(S), 2), round(float(S_norm), 4)
 
@@ -207,7 +298,6 @@ def habitable_surface_fraction(
 # ─── Interior-Surface-Atmosphere (ISA) interactions ──────────────────────────
 
 G_EARTH = 9.81   # m/s²
-R_EARTH = 6.371e6  # m
 
 
 def estimate_outgassing_rate(
@@ -217,10 +307,14 @@ def estimate_outgassing_rate(
 ) -> Dict[str, float]:
     """Estimate volcanic outgassing rate relative to Earth.
 
-    Uses a heuristic scaling: outgassing ~ (M/R²)^α × (age/4.5)^(-β),
-    reflecting the mantle convection vigor (proportional to surface
-    gravity) and radiogenic heat decay over time. Based on simplified
-    Kite et al. (2009) parameterisation.
+    Scaling: outgassing ~ (g/g_E)^0.75 × (age/4.5)^(-1.5) × H_radio
+
+    Extends the Kite et al. (2009) parameterisation with a crude
+    radiogenic heat budget proxy. Young planets (< 1 Gyr) receive a
+    boost reflecting higher concentrations of short-lived radioisotopes
+    (⁴⁰K, ²³²Th, ²³⁸U). Massive planets (> 2 M_E) also receive a
+    gravity-dependent interior pressure correction per Stamenković
+    et al. (2012).
     """
     if radius_earth <= 0:
         return {
@@ -228,14 +322,22 @@ def estimate_outgassing_rate(
             "co2_flux_mol_yr": 0.0,
             "surface_gravity_ms2": 0.0,
             "mantle_convection_vigor": "low",
+            "radiogenic_factor": 1.0,
         }
-    age_gyr = max(age_gyr, 0.1)  # floor at 100 Myr — youngest characterised systems
+    age_gyr = max(age_gyr, 0.1)
     g_planet = G_EARTH * mass_earth / radius_earth ** 2
     g_ratio = g_planet / G_EARTH
     age_factor = (age_gyr / 4.5) ** (-1.5)
-    rate_relative = g_ratio ** 0.75 * age_factor
 
-    co2_flux_earth = 6.0e12  # mol/yr (present-day Earth)
+    radiogenic = 1.0
+    if age_gyr < 1.0:
+        radiogenic = 1.0 + 0.5 * (1.0 - age_gyr)
+    if mass_earth > 2.0:
+        radiogenic *= max(0.6, 1.0 - 0.05 * (mass_earth - 2.0))
+
+    rate_relative = g_ratio ** 0.75 * age_factor * radiogenic
+
+    co2_flux_earth = 6.0e12
     co2_flux = co2_flux_earth * rate_relative
 
     return {
@@ -245,7 +347,26 @@ def estimate_outgassing_rate(
         "mantle_convection_vigor": "high" if g_ratio > 1.2 else (
             "moderate" if g_ratio > 0.6 else "low"
         ),
+        "radiogenic_factor": round(radiogenic, 3),
     }
+
+
+def _tectonic_plausibility(
+    mass_earth: float, radius_earth: float, age_gyr: float
+) -> str:
+    """3-level tectonic plausibility index.
+
+    Based on parameter ranges from Stamenković et al. (2012) and
+    Driscoll & Barnes (2015). Returns ``"plausible"``, ``"uncertain"``,
+    or ``"unlikely"`` rather than a binary flag.
+    """
+    if radius_earth > 2.5 or mass_earth < 0.1:
+        return "unlikely"
+    if mass_earth > 8.0:
+        return "unlikely"
+    if 0.5 <= mass_earth <= 5.0 and radius_earth <= 2.0 and age_gyr >= 0.5:
+        return "plausible"
+    return "uncertain"
 
 
 def estimate_isa_interaction(
@@ -260,16 +381,15 @@ def estimate_isa_interaction(
     Models the coupling between geological activity, surface
     chemistry, and atmospheric composition — a key criterion for
     realistic habitability assessment (Steinmeyer et al.).
+    The plate tectonics assessment uses a 3-level plausibility index
+    (Stamenković et al. 2012, Driscoll & Barnes 2015) rather than a
+    simple boolean.
     """
     outgassing = estimate_outgassing_rate(mass_earth, radius_earth, age_gyr)
-
-    has_plate_tectonics = (
-        mass_earth >= 0.5 and mass_earth <= 5.0
-        and radius_earth <= 2.0
-    )
+    tectonics = _tectonic_plausibility(mass_earth, radius_earth, age_gyr)
 
     carbonate_silicate_active = (
-        has_plate_tectonics
+        tectonics == "plausible"
         and 200 <= T_eq <= 400
         and outgassing["outgassing_rate_earth"] > 0.3
     )
@@ -277,16 +397,17 @@ def estimate_isa_interaction(
     water_cycling = 273 <= T_eq <= 373
     volatile_retention = estimate_escape_velocity(mass_earth, radius_earth) >= 5.0
 
-    isa_score = sum([
-        has_plate_tectonics,
-        carbonate_silicate_active,
-        water_cycling,
-        volatile_retention,
-    ]) / 4.0
+    score_components = [
+        1.0 if tectonics == "plausible" else (0.5 if tectonics == "uncertain" else 0.0),
+        1.0 if carbonate_silicate_active else 0.0,
+        1.0 if water_cycling else 0.0,
+        1.0 if volatile_retention else 0.0,
+    ]
+    isa_score = sum(score_components) / len(score_components)
 
     return {
         "outgassing": outgassing,
-        "plate_tectonics_likely": has_plate_tectonics,
+        "plate_tectonics": tectonics,
         "carbonate_silicate_cycle": carbonate_silicate_active,
         "water_cycling": water_cycling,
         "volatile_retention": volatile_retention,
@@ -301,6 +422,41 @@ def estimate_isa_interaction(
 
 # ─── Photochemical false-positive mitigation ─────────────────────────────────
 
+_UV_BOLOMETRIC_TABLE = {
+    2800: 0.001,
+    3300: 0.005,
+    3800: 0.015,
+    4500: 0.04,
+    5200: 0.06,
+    5778: 0.08,
+    6500: 0.12,
+    7500: 0.18,
+    10000: 0.25,
+}
+
+
+def _interpolate_uv_fraction(star_teff: float) -> float:
+    """UV/bolometric flux ratio interpolated from tabulated spectral-type data.
+
+    Based on representative UV/bolometric ratios for F-/G-/K-/M-type stars
+    compiled from France et al. (2013) and Lammer et al. (2009) spectral
+    measurements. Replaces the previous linear UV fraction parameterization.
+    """
+    temps = sorted(_UV_BOLOMETRIC_TABLE.keys())
+    if star_teff <= temps[0]:
+        return _UV_BOLOMETRIC_TABLE[temps[0]]
+    if star_teff >= temps[-1]:
+        return _UV_BOLOMETRIC_TABLE[temps[-1]]
+    for i in range(len(temps) - 1):
+        if temps[i] <= star_teff <= temps[i + 1]:
+            t0, t1 = temps[i], temps[i + 1]
+            f0 = _UV_BOLOMETRIC_TABLE[t0]
+            f1 = _UV_BOLOMETRIC_TABLE[t1]
+            frac = (star_teff - t0) / (t1 - t0)
+            return f0 + frac * (f1 - f0)
+    return 0.08
+
+
 def estimate_uv_flux(
     star_teff: float,
     star_radius: float,
@@ -308,29 +464,88 @@ def estimate_uv_flux(
 ) -> Dict[str, float]:
     """Estimate UV radiation environment at the planet's orbit.
 
-    Hotter stars emit proportionally more UV. This is critical for
-    assessing whether biosignature-like gases (O2, O3, CH4) could be
-    produced abiotically via photolysis.
+    Uses tabulated UV/bolometric ratios for representative spectral types
+    (France et al. 2013, Lammer et al. 2009) instead of a single linear
+    parametric fit. Critical for assessing abiotic photolysis pathways.
     """
     R_star_m = star_radius * R_SUN
     a_m = max(semi_major_axis, 1e-6) * AU
 
     L_bol = 4 * np.pi * R_star_m**2 * STEFAN_BOLTZMANN * star_teff**4
-    t_norm = np.clip((star_teff - 2500) / (10000 - 2500), 0.0, 1.0)
-    uv_fraction = 0.005 + 0.20 * t_norm**1.3
+    uv_fraction = _interpolate_uv_fraction(star_teff)
     L_uv = L_bol * uv_fraction
     F_uv = L_uv / (4 * np.pi * a_m**2)
-    F_uv_earth = S_EARTH * 0.08  # ~8% of solar flux is UV
+    F_uv_earth = S_EARTH * 0.08
 
     return {
         "uv_flux_Wm2": round(float(F_uv), 2),
         "uv_flux_earth": round(float(F_uv / F_uv_earth), 3),
+        "uv_fraction_used": round(uv_fraction, 4),
         "uv_hazard": (
             "extreme" if F_uv / F_uv_earth > 5 else
             "high" if F_uv / F_uv_earth > 2 else
             "moderate" if F_uv / F_uv_earth > 0.5 else
             "low"
         ),
+    }
+
+
+# ─── Atmospheric escape diagnostic ───────────────────────────────────────────
+
+
+def estimate_atmospheric_escape(
+    mass_earth: float,
+    radius_earth: float,
+    star_teff: float,
+    semi_major_axis: float,
+    star_radius: float,
+    age_gyr: float = 4.5,
+) -> Dict[str, object]:
+    """Energy-limited atmospheric escape time-scale estimate.
+
+    Implements the energy-limited escape formalism (Watson et al. 1981,
+    Erkaev et al. 2007):
+
+        dM/dt = (epsilon * pi * F_XUV * R_p * R_XUV^2) / (G * M_p * K_tide)
+
+    where epsilon is a heating efficiency (~0.15, Lammer et al. 2009),
+    F_XUV is the XUV flux, and K_tide is a tidal correction factor
+    (set to 1 for simplicity).
+
+    Returns a categorical flag: ``"retained"``, ``"borderline"``,
+    or ``"escape_dominated"`` based on the ratio of escape time-scale
+    to system age.
+    """
+    if mass_earth <= 0 or radius_earth <= 0:
+        return {"escape_flag": "unknown", "escape_timescale_gyr": None, "mass_loss_rate_kg_s": 0.0}
+
+    uv_data = estimate_uv_flux(star_teff, star_radius, semi_major_axis)
+    F_xuv = uv_data["uv_flux_Wm2"] * 0.001
+
+    R_p = radius_earth * R_EARTH_M
+    M_p = mass_earth * M_EARTH_KG
+    epsilon = 0.15
+    R_xuv = R_p * 1.2
+
+    dM_dt = (epsilon * np.pi * F_xuv * R_p * R_xuv**2) / (G_GRAV * M_p)
+    dM_dt = max(dM_dt, 1e-20)
+
+    H_envelope_kg = 0.05 * M_p
+    tau_s = H_envelope_kg / dM_dt
+    tau_gyr = tau_s / (3.156e16)
+
+    if tau_gyr > 10 * age_gyr:
+        flag = "retained"
+    elif tau_gyr > age_gyr:
+        flag = "borderline"
+    else:
+        flag = "escape_dominated"
+
+    return {
+        "escape_flag": flag,
+        "escape_timescale_gyr": round(float(tau_gyr), 2) if np.isfinite(tau_gyr) else None,
+        "mass_loss_rate_kg_s": round(float(dM_dt), 2),
+        "xuv_flux_Wm2": round(float(F_xuv), 2),
     }
 
 
@@ -540,15 +755,19 @@ def compute_full_analysis(
     semi_major_axis: float,
     albedo: float = 0.3,
     tidally_locked: bool = True,
+    eccentricity: float = 0.0,
 ) -> Dict[str, object]:
     """End-to-end analysis from raw NASA parameters to results dict."""
     R_earth = planet_radius_jup * 11.209
     M_earth = planet_mass_jup * 317.83
 
     T_eq = equilibrium_temperature(
-        stellar_temp, stellar_radius, semi_major_axis, albedo, tidally_locked
+        stellar_temp, stellar_radius, semi_major_axis, albedo,
+        tidally_locked, eccentricity,
     )
-    S_abs, S_norm = stellar_flux(stellar_temp, stellar_radius, semi_major_axis)
+    S_abs, S_norm = stellar_flux(
+        stellar_temp, stellar_radius, semi_major_axis, eccentricity,
+    )
 
     density = estimate_density(M_earth, R_earth)
     v_escape = estimate_escape_velocity(M_earth, R_earth)
@@ -561,6 +780,9 @@ def compute_full_analysis(
     isa = estimate_isa_interaction(M_earth, R_earth, T_eq, tidally_locked)
     false_pos = assess_biosignature_false_positives(
         stellar_temp, stellar_radius, semi_major_axis, T_eq, M_earth, R_earth
+    )
+    escape = estimate_atmospheric_escape(
+        M_earth, R_earth, stellar_temp, semi_major_axis, stellar_radius,
     )
 
     return {
@@ -576,6 +798,8 @@ def compute_full_analysis(
         "in_habitable_zone": in_hz,
         "liquid_water_possible": has_liquid_water,
         "tidally_locked": tidally_locked,
+        "eccentricity": eccentricity,
         "isa_interaction": isa,
         "biosignature_false_positives": false_pos,
+        "atmospheric_escape": escape,
     }

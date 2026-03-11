@@ -1,36 +1,80 @@
 """
-LangChain agent orchestration — dual-model setup.
+LangChain agent orchestration — configurable single/dual-model setup.
 
-* Primary agent  : Qwen2.5-14B (tool-calling orchestrator)
-* Domain expert  : AstroAgent (astro-specialised system prompt)
-* Tools          : NASA query, habitability computation, climate simulation
+Runtime modes
+-------------
+* ``AgentMode.DUAL_LLM``   : Qwen 2.5-14B orchestrator + astro-agent domain expert (default).
+* ``AgentMode.SINGLE_LLM`` : astro-agent handles both orchestration and interpretation.
+* ``AgentMode.DETERMINISTIC``: No LLM — deterministic tools only (physics + ML).
+
+The active mode is selected at agent-creation time via ``build_agent(mode)``.
 """
 
 import json
+import logging
+from enum import Enum
+from typing import Optional
 
 from langchain.agents import AgentExecutor, create_tool_calling_agent
 from langchain.tools import tool
 from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
 from langchain_ollama import ChatOllama
 
-# ─── LLM instances ────────────────────────────────────────────────────────────
+logger = logging.getLogger(__name__)
+
+# ─── Runtime modes ─────────────────────────────────────────────────────────────
+
+
+class AgentMode(str, Enum):
+    DUAL_LLM = "dual_llm"
+    SINGLE_LLM = "single_llm"
+    DETERMINISTIC = "deterministic"
+
+
+# ─── LLM factory ──────────────────────────────────────────────────────────────
 
 _BASE_URL = "http://localhost:11434"
 
-primary_llm = ChatOllama(
-    model="qwen2.5:14b",
-    temperature=0.3,
-    num_ctx=8192,
-    base_url=_BASE_URL,
-)
 
-# Fallback / domain-expert model (astro system prompt baked via Modelfile)
-domain_llm = ChatOllama(
-    model="astro-agent",
-    temperature=0.3,
-    num_ctx=8192,
-    base_url=_BASE_URL,
-)
+def _make_llm(model: str) -> ChatOllama:
+    return ChatOllama(
+        model=model,
+        temperature=0.3,
+        num_ctx=8192,
+        base_url=_BASE_URL,
+    )
+
+
+_primary_llm: Optional[ChatOllama] = None
+_domain_llm: Optional[ChatOllama] = None
+
+
+def _get_primary_llm() -> ChatOllama:
+    global _primary_llm
+    if _primary_llm is None:
+        _primary_llm = _make_llm("qwen2.5:14b")
+    return _primary_llm
+
+
+def _get_domain_llm() -> ChatOllama:
+    global _domain_llm
+    if _domain_llm is None:
+        _domain_llm = _make_llm("astrosage")
+    return _domain_llm
+
+
+def get_domain_llm_for_mode(mode: AgentMode) -> Optional[ChatOllama]:
+    """Return the domain-expert LLM for the given mode, or None."""
+    if mode == AgentMode.DETERMINISTIC:
+        return None
+    if mode == AgentMode.SINGLE_LLM:
+        return _get_domain_llm()
+    return _get_domain_llm()
+
+
+# Legacy module-level aliases (kept for backward compat with llm_helpers.py)
+primary_llm = property(lambda self: _get_primary_llm())
+domain_llm = property(lambda self: _get_domain_llm())
 
 
 # ─── Tool definitions ─────────────────────────────────────────────────────────
@@ -206,21 +250,22 @@ def run_climate_simulation(
 def consult_domain_expert(question: str, context: str = "") -> str:
     """Ask the astrophysics domain-expert model for a scientific interpretation.
 
-    ALWAYS call this after computing habitability metrics or running a
-    simulation — never present raw numbers without expert interpretation.
+    Call this after computing habitability metrics or running a
+    simulation to get expert-level interpretation of the results.
 
     Args:
         question: A scientific question to pose to the domain expert.
         context: Optional JSON-encoded structured data (simulation
             results, NASA data) to give the expert more context.
     """
+    llm = _get_domain_llm()
     full_prompt = question
     if context:
         full_prompt = (
             f"Context data:\n{context}\n\n"
             f"Question: {question}"
         )
-    response = domain_llm.invoke(full_prompt)
+    response = llm.invoke(full_prompt)
     return response.content
 
 
@@ -281,7 +326,7 @@ def discover_most_habitable(top_n: int = 5) -> str:
         "For each planet give one sentence of scientific reasoning.\n\n"
         + json.dumps(top, indent=2)
     )
-    expert_opinion = domain_llm.invoke(expert_prompt).content
+    expert_opinion = _get_domain_llm().invoke(expert_prompt).content
     return f"Top {top_n} by ESI:\n{json.dumps(top, indent=2)}\n\nDomain-expert evaluation:\n{expert_opinion}"
 
 
@@ -328,7 +373,7 @@ def compare_two_planets(planet_a_name: str, planet_b_name: str) -> str:
         f"Planet A ({planet_a_name}):\n{json.dumps(results[planet_a_name], indent=2, default=str)}\n\n"
         f"Planet B ({planet_b_name}):\n{json.dumps(results[planet_b_name], indent=2, default=str)}"
     )
-    comparison = domain_llm.invoke(expert_prompt).content
+    comparison = _get_domain_llm().invoke(expert_prompt).content
     return comparison
 
 
@@ -441,50 +486,32 @@ CAPABILITIES
 PROCEDURE
 1. When the user asks about a planet → first fetch data from NASA.
 2. From the data → compute habitability metrics.
-3. ALWAYS consult the domain expert after computing habitability metrics.
-   Never present raw numbers without expert interpretation. Pass the
-   computed results as the `context` parameter.
+3. Consult the domain expert after computing habitability metrics
+   to provide expert interpretation alongside the raw numbers.
 4. If a climate simulation is requested or relevant → run it, then
    consult the domain expert again to interpret the temperature map.
 5. Synthesise the domain expert's opinion with the numbers into a clear answer.
+   Always present raw numeric results alongside any narrative.
 
 CITATION POLICY
-- ALWAYS call cite_scientific_literature after presenting habitability analysis
-  or any substantive scientific claim. Use specific queries, e.g.:
+- Call cite_scientific_literature when presenting habitability analysis
+  or substantive scientific claims. Use specific queries, e.g.:
   "habitable zone boundaries for M-dwarf stars" rather than "habitable zone".
-- Use the topics parameter for targeted retrieval. Available topic tags:
-  habitable_zone, m_dwarf, tidal_locking, biosignatures, false_positives,
-  atmospheric_escape, climate_modeling, gcm, cloud_feedback,
-  ocean_heat_transport, planetary_interior, plate_tectonics, mass_radius,
-  stellar_activity, uv_environment, jwst, transit_spectroscopy, astrobiology.
-- Include at least 2-3 citations per substantive claim in your final answer.
-- Reference key findings from the retrieved papers to ground your statements.
-- When discussing M-dwarf planets, cite relevant papers on tidal locking,
-  atmospheric escape, and stellar activity.
-- When discussing biosignatures, always cite false-positive literature.
+- Use the topics parameter for targeted retrieval when appropriate.
+- Reference key findings from retrieved papers to ground your statements.
+- Cite when relevant — do not force citations where they add no value.
 
 RULES
 - Always cite the data source (NASA Exoplanet Archive).
 - Never invent parameter values — always use tool outputs.
 - Express temperatures in Kelvin.
 - ESI is in [0, 1]; 1.0 = identical to Earth.
-- Flag uncertainties and model limitations.
+- Flag uncertainties and model limitations explicitly.
 - When comparing planets, prefer the compare_two_planets tool.
 - For "find habitable" queries, use discover_most_habitable.
-- Cite scientific literature to support key claims when relevant.
-
-NEW TOOL USAGE GUIDANCE
-- Use classify_planet_radius_gap whenever a planet's radius suggests it may sit
-  in the Fulton Gap (1.5–2.0 Earth radii), or when the user asks about
-  sub-Neptune vs super-Earth distinction, or atmosphere retention.
-- Use predict_sulfur_chemistry when discussing surface conditions, clouds,
-  or mineralogy, or when the user asks about H2S, H2SO4, or Venus-like environments.
-- Use assess_carbon_oxygen_ratio when the user provides or asks about a C/O ratio,
-  or when discussing whether a planet could host liquid water vs. being a dry
-  carbon world. The returned esi_modifier field explains any ESI adjustment.
 """
 
-prompt = ChatPromptTemplate.from_messages(
+_PROMPT_TEMPLATE = ChatPromptTemplate.from_messages(
     [
         ("system", SYSTEM_PROMPT),
         MessagesPlaceholder(variable_name="chat_history"),
@@ -493,14 +520,36 @@ prompt = ChatPromptTemplate.from_messages(
     ]
 )
 
-# ─── Agent executor ───────────────────────────────────────────────────────────
 
-agent = create_tool_calling_agent(primary_llm, tools, prompt)
+# ─── Agent builder ────────────────────────────────────────────────────────────
 
-agent_executor = AgentExecutor(
-    agent=agent,
-    tools=tools,
-    verbose=True,
-    max_iterations=10,
-    handle_parsing_errors=True,
-)
+def build_agent(mode: AgentMode = AgentMode.DUAL_LLM) -> Optional[AgentExecutor]:
+    """Construct an AgentExecutor for the requested runtime mode.
+
+    Returns ``None`` when mode is DETERMINISTIC (no LLM needed).
+    """
+    if mode == AgentMode.DETERMINISTIC:
+        logger.info("AgentMode.DETERMINISTIC — no LLM agent created.")
+        return None
+
+    if mode == AgentMode.SINGLE_LLM:
+        llm = _get_domain_llm()
+        max_iter = 5
+        logger.info("AgentMode.SINGLE_LLM — astro-agent as sole LLM.")
+    else:
+        llm = _get_primary_llm()
+        max_iter = 7
+        logger.info("AgentMode.DUAL_LLM — Qwen orchestrator + astro-agent expert.")
+
+    agent = create_tool_calling_agent(llm, tools, _PROMPT_TEMPLATE)
+    return AgentExecutor(
+        agent=agent,
+        tools=tools,
+        verbose=True,
+        max_iterations=max_iter,
+        handle_parsing_errors=True,
+    )
+
+
+# Legacy default executor (backward compat with app.py before mode migration)
+agent_executor = build_agent(AgentMode.DUAL_LLM)

@@ -70,8 +70,17 @@ def create_3d_globe(
     colorscale: Optional[list] = None,
     show_star: bool = True,
     star_teff: Optional[float] = None,
+    cloud_map: Optional[np.ndarray] = None,
+    cloud_opacity: float = 0.55,
 ) -> go.Figure:
-    """Render an interactive 3-D sphere coloured by surface temperature."""
+    """Render an interactive 3-D sphere coloured by surface temperature.
+
+    If ``cloud_map`` is provided it is assumed to be a diagnostic
+    cloud-fraction field f_cloud ∈ [0, 1] from the PINNFormer 3-D
+    solution on the same (lat, lon) grid. A semi-transparent white
+    overlay is drawn on top of the thermal texture to visualise
+    substellar cloud decks and nightside clearing.
+    """
     n_lat, n_lon = temperature_map.shape
     theta = np.linspace(0, 2 * np.pi, n_lon)
     phi = np.linspace(-np.pi / 2, np.pi / 2, n_lat)
@@ -118,6 +127,37 @@ def create_3d_globe(
     )
 
     fig = go.Figure(data=[surface])
+
+    # Optional cloud-fraction overlay (from PINNFormer 3-D)
+    if cloud_map is not None:
+        try:
+            c_map = np.asarray(cloud_map, dtype=float)
+            if c_map.shape != temperature_map.shape:
+                # Do not attempt to resample on mismatched grids; ignore safely.
+                raise ValueError("cloud_map shape mismatch")
+            c_map = np.clip(c_map, 0.0, 1.0)
+            c_rolled = np.roll(c_map, n_lon // 2, axis=1)
+            cloud_surface = go.Surface(
+                x=X,
+                y=Y,
+                z=Z * 1.001,  # sit slightly above the thermal surface
+                surfacecolor=c_rolled,
+                colorscale=[
+                    [0.0, "rgba(255,255,255,0.0)"],
+                    [1.0, "rgba(255,255,255,1.0)"],
+                ],
+                cmin=0.0,
+                cmax=1.0,
+                showscale=False,
+                opacity=float(np.clip(cloud_opacity, 0.0, 1.0)),
+                hoverinfo="skip",
+                name="Cloud fraction",
+            )
+            fig.add_trace(cloud_surface)
+        except Exception:
+            # Visualisation should never break the app; if the overlay
+            # cannot be rendered we simply fall back to temperature only.
+            pass
 
     # Optional host-star point
     if show_star:
