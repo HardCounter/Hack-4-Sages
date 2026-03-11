@@ -605,6 +605,12 @@ with tab_manual:
                 else:
                     temp_map = raw_result
 
+                if isinstance(temp_map, dict):
+                    cloud_map = temp_map.get("cloud")
+                    ice_map = temp_map.get("ice")
+                    ocean_map = temp_map.get("ocean")
+                    temp_map = temp_map["temperature"]
+
                 if not gd.validate_temperature_map(temp_map):
                     temp_map = _analytical_fallback()
 
