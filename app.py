@@ -185,6 +185,19 @@ def _load_elm():
     return m
 
 
+@st.cache_resource
+def _load_pinn():
+    """Load trained PINNFormer 3-D weights. Returns (model, device) or (None, device)."""
+    try:
+        import torch
+        from modules.pinnformer3d import load_pinnformer
+        device = "cuda" if torch.cuda.is_available() else "cpu"
+        model = load_pinnformer("models/pinn3d_weights.pt", device=device)
+        return model, device
+    except (FileNotFoundError, ImportError, Exception):
+        return None, "cpu"
+
+
 # ─── Session-state defaults ──────────────────────────────────────────────────
 
 for k, v in {
@@ -369,6 +382,17 @@ with tab_manual:
                 list(_ATM_LABELS.keys()),
                 help="Dominant atmospheric regime for sulfur chemistry")]
 
+        st.markdown("##### Climate Model")
+        _MODEL_LABELS = ["ELM Ensemble", "PINNFormer 3-D", "Analytical"]
+        climate_model = st.radio(
+            "Model", _MODEL_LABELS, horizontal=True, index=0,
+            help=(
+                "ELM — fast data-driven surrogate (parameterised per planet). "
+                "PINNFormer — physics-informed neural network (solves the heat PDE). "
+                "Analytical — algebraic cos^1/4 profile (always available)."
+            ),
+        )
+
         btn_col, toggle_col = st.columns([3, 2], gap="small")
         with btn_col:
             run_sim = st.button("Run Simulation", type="primary", use_container_width=True)
@@ -381,6 +405,7 @@ with tab_manual:
         star_teff=star_teff, star_radius=star_radius, planet_radius=planet_radius,
         planet_mass=planet_mass, semi_major=semi_major, albedo=albedo, locked=locked,
         co_ratio=co_ratio, surface_pressure=surface_pressure, atm_type=atm_type,
+        climate_model=climate_model,
     )
     _params_changed = (_curr != _prev)
     should_compute = run_sim or (live_mode and _params_changed)
@@ -434,32 +459,76 @@ with tab_manual:
 
                 SimulationOutput(T_eq_K=T_eq, ESI=esi, flux_earth=S_norm)
 
-                _pipeline.write("Generating climate map (ELM / analytical)\u2026")
+                _pipeline.write(f"Generating climate map ({climate_model})\u2026")
                 gd = GracefulDegradation()
+
+                _elm_params = {
+                    "radius_earth": planet_radius,
+                    "mass_earth": planet_mass,
+                    "semi_major_axis_au": semi_major,
+                    "star_teff_K": star_teff,
+                    "star_radius_solar": star_radius,
+                    "insol_earth": S_norm,
+                    "albedo": albedo,
+                    "tidally_locked": int(locked),
+                }
 
                 def _elm_predict():
                     elm = _load_elm()
                     if not elm.models:
                         raise FileNotFoundError("ELM not trained")
-                    params = {
-                        "radius_earth": planet_radius,
-                        "mass_earth": planet_mass,
-                        "semi_major_axis_au": semi_major,
-                        "star_teff_K": star_teff,
-                        "star_radius_solar": star_radius,
-                        "insol_earth": S_norm,
-                        "albedo": albedo,
-                        "tidally_locked": int(locked),
-                    }
-                    return elm.predict_from_params(params)
+                    return elm.predict_from_params(_elm_params)
+
+                def _pinn_predict():
+                    pinn_model, pinn_device = _load_pinn()
+                    if pinn_model is None:
+                        raise FileNotFoundError("PINNFormer not trained")
+                    from modules.pinnformer3d import predict_temperature_map
+                    raw = predict_temperature_map(
+                        pinn_model, n_lat=64, n_lon=128, z=0.5,
+                        device=pinn_device,
+                    )
+                    T_sub_target = T_eq * 1.4
+                    T_night_target = max(T_eq * 0.3, 40)
+                    pinn_min, pinn_max = float(raw.min()), float(raw.max())
+                    span = pinn_max - pinn_min
+                    if span < 1e-3:
+                        return np.full_like(raw, T_eq)
+                    return T_night_target + (raw - pinn_min) / span * (
+                        T_sub_target - T_night_target
+                    )
 
                 def _analytical_fallback():
                     return generate_eyeball_map(T_eq, tidally_locked=locked)
 
-                temp_map = gd.run_with_fallback(
-                    _elm_predict, _analytical_fallback,
-                    timeout=5.0, label="ELM Surrogate",
-                )
+                if climate_model == "PINNFormer 3-D":
+                    if not locked:
+                        st.info(
+                            "PINNFormer was trained for tidally locked planets. "
+                            "Results are rescaled but the spatial pattern assumes tidal locking."
+                        )
+                    temp_map = gd.run_with_fallback(
+                        _pinn_predict,
+                        lambda: gd.run_with_fallback(
+                            _elm_predict, _analytical_fallback,
+                            timeout=5.0, label="ELM Surrogate",
+                        ),
+                        timeout=10.0,
+                        label="PINNFormer 3-D",
+                    )
+                elif climate_model == "ELM Ensemble":
+                    temp_map = gd.run_with_fallback(
+                        _elm_predict,
+                        lambda: gd.run_with_fallback(
+                            _pinn_predict, _analytical_fallback,
+                            timeout=10.0, label="PINNFormer 3-D",
+                        ),
+                        timeout=5.0,
+                        label="ELM Surrogate",
+                    )
+                else:
+                    temp_map = _analytical_fallback()
+
                 if not gd.validate_temperature_map(temp_map):
                     temp_map = _analytical_fallback()
 
@@ -1260,7 +1329,21 @@ with tab_system:
             except Exception as exc:
                 checks["ELM model"] = f"{_ICON_NO} {exc}"
 
-            # 5. Ollama
+            # 5. PINNFormer 3-D
+            st.write("Checking PINNFormer 3-D...")
+            try:
+                pinn_m, pinn_d = _load_pinn()
+                if pinn_m is not None:
+                    n_params = sum(p.numel() for p in pinn_m.parameters())
+                    checks["PINNFormer 3-D"] = (
+                        f"{_ICON_YES} loaded ({n_params/1e6:.1f}M params, {pinn_d})"
+                    )
+                else:
+                    checks["PINNFormer 3-D"] = f"{_ICON_WARN} not trained yet"
+            except Exception as exc:
+                checks["PINNFormer 3-D"] = f"{_ICON_NO} {exc}"
+
+            # 6. Ollama
             st.write("Checking Ollama...")
             try:
                 import ollama as _oll
@@ -1335,6 +1418,7 @@ flowchart TB
     Qwen --> NASA
     Qwen --> Physics
     ManualTab --> ELM
+    ManualTab --> PINN
     ManualTab --> Physics
     CatalogTab --> NASA
     CatalogTab --> IsoForest
