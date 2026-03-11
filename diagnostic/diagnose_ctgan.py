@@ -352,7 +352,7 @@ def main() -> None:
     os.makedirs(DIAG_DIR, exist_ok=True)
     html = _build_html_report(real_hab, synthetic, ks_df, dcr=dcr)
     report_path = os.path.join(DIAG_DIR, "ctgan_report.html")
-    with open(report_path, "w") as f:
+    with open(report_path, "w", encoding="utf-8") as f:
         f.write(html)
     print(f"\nHTML report saved to {report_path}")
 
