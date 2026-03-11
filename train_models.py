@@ -181,6 +181,8 @@ def train_pinn(epochs: int = 5000, n_colloc: int = 8192):
     device = "cuda" if torch.cuda.is_available() else "cpu"
     print(f"  Device : {device}")
     if device == "cuda":
+        backend = "ROCm/HIP" if getattr(torch.version, "hip", None) else "CUDA"
+        print(f"  Backend: {backend}")
         print(f"  GPU    : {torch.cuda.get_device_name(0)}")
         vram = torch.cuda.get_device_properties(0).total_memory / 1e9
         print(f"  VRAM   : {vram:.1f} GB")

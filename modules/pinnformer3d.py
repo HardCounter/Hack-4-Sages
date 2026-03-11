@@ -124,7 +124,7 @@ if _HAS_TORCH:
         log_every: int = 500,
     ) -> PINNFormer3D:
         """Train a PINNFormer3D and return the model."""
-        if not torch.cuda.is_available() and device == "cuda":
+        if device == "cuda" and not torch.cuda.is_available():
             device = "cpu"
 
         model = PINNFormer3D().to(device)

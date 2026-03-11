@@ -6,11 +6,40 @@ Archive (only ~60 potentially habitable planets out of ~5 700) by
 synthesising physically plausible planetary configurations.
 """
 
+import io
 import pickle
 from typing import List, Optional
 
 import pandas as pd
 import numpy as np
+
+
+class _DeviceRemappingUnpickler(pickle.Unpickler):
+    """Unpickler that remaps CUDA tensor storages to the available device.
+
+    Fixes 'Attempting to deserialize object on a CUDA device but
+    torch.cuda.is_available() is False' when loading a model that was
+    trained on CUDA/ROCm on a machine that has no GPU or a different backend.
+    """
+
+    def __init__(self, f):
+        super().__init__(f)
+        try:
+            import torch
+            self._device = "cuda" if torch.cuda.is_available() else "cpu"
+        except ImportError:
+            self._device = "cpu"
+
+    def find_class(self, module, name):
+        if module == "torch.storage" and name == "_load_from_bytes":
+            dev = self._device
+
+            def _load(b):
+                import torch
+                return torch.load(io.BytesIO(b), map_location=dev, weights_only=False)
+
+            return _load
+        return super().find_class(module, name)
 
 try:
     from ctgan import CTGAN
@@ -210,7 +239,7 @@ class ExoplanetDataAugmenter:
 
     def load_model(self, path: str = "models/ctgan_exoplanets.pkl") -> None:
         with open(path, "rb") as f:
-            payload = pickle.load(f)
+            payload = _DeviceRemappingUnpickler(f).load()
         if isinstance(payload, dict):
             self.model = payload["model"]
             self._log_transformed = payload.get("log_transformed", False)
