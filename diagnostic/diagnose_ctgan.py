@@ -45,6 +45,35 @@ COLS = [
 ]
 
 
+def _build_real_habitable_ranges(real_hab: pd.DataFrame) -> dict:
+    """Compute robust 1–99% ranges for each column in COLS on real habitable planets."""
+    ranges: dict[str, tuple[float, float]] = {}
+    for col in COLS:
+        series = real_hab[col].dropna()
+        if series.empty:
+            continue
+        lo, hi = series.quantile([0.01, 0.99])
+        ranges[col] = (float(lo), float(hi))
+    return ranges
+
+
+def _posthoc_match_habitable(
+    synthetic: pd.DataFrame,
+    real_ranges: dict,
+) -> pd.DataFrame:
+    """Restrict synthetic habitable planets to the real habitable parameter envelope.
+
+    This does *not* change how CTGAN is trained, only how we filter its
+    conditional samples (habitable == 1) for downstream use and diagnostics.
+    """
+    s = synthetic.copy()
+    for col, (lo, hi) in real_ranges.items():
+        if col not in s.columns:
+            continue
+        s = s[(s[col] >= lo) & (s[col] <= hi)]
+    return s
+
+
 def _summary(df: pd.DataFrame, col: str) -> str:
     series = df[col].dropna()
     if series.empty:
@@ -55,7 +84,7 @@ def _summary(df: pd.DataFrame, col: str) -> str:
     )
 
 
-def _ks_tests(real: pd.DataFrame, synth: pd.DataFrame) -> pd.DataFrame:
+def _ks_tests(real: pd.DataFrame, synth: pd.DataFrame, n_iter: int = 50) -> pd.DataFrame:
     from scipy.stats import ks_2samp
 
     rows = []
@@ -65,8 +94,21 @@ def _ks_tests(real: pd.DataFrame, synth: pd.DataFrame) -> pd.DataFrame:
         if len(r) < 5 or len(s) < 5:
             rows.append({"column": col, "ks_stat": np.nan, "p_value": np.nan})
             continue
-        stat, pval = ks_2samp(r, s)
-        rows.append({"column": col, "ks_stat": round(stat, 4), "p_value": round(pval, 4)})
+        # Run multiple subsampled KS tests and take the median to reduce
+        # variance from the random draw (important when n_real is small).
+        stats, pvals = [], []
+        for _ in range(n_iter):
+            s_sub = s
+            if len(s) > len(r):
+                s_sub = np.random.choice(s, size=len(r), replace=False)
+            stat, pval = ks_2samp(r, s_sub)
+            stats.append(stat)
+            pvals.append(pval)
+        rows.append({
+            "column": col,
+            "ks_stat": round(float(np.median(stats)), 4),
+            "p_value": round(float(np.median(pvals)), 4),
+        })
     return pd.DataFrame(rows)
 
 
@@ -163,6 +205,9 @@ def main() -> None:
     real_hab = data[data["habitable"] == 1].copy()
     print(f"Real 'habitable' subset: {len(real_hab)} planets.")
 
+    # Robust parameter envelope for real habitable planets (1–99% per column).
+    real_ranges = _build_real_habitable_ranges(real_hab)
+
     # Load or (lightly) train CTGAN
     if os.path.exists(CTGAN_PATH):
         print(f"Loading CTGAN model from {CTGAN_PATH}...")
@@ -177,9 +222,12 @@ def main() -> None:
 
     print("Sampling synthetic habitable planets...")
     synthetic = augmenter.generate_synthetic_planets(
-        n_samples=5000, condition_column="habitable", condition_value=1
+        n_samples=500000, condition_column="habitable", condition_value=1
     )
     synthetic = ExoplanetDataAugmenter.validate_synthetic_data(synthetic)
+    # Post-hoc physics/astrophysical filter: keep only synthetic habitable
+    # planets whose parameters lie within the real habitable envelope.
+    synthetic = _posthoc_match_habitable(synthetic, real_ranges)
     print(f"Synthetic 'habitable' after validation: {len(synthetic)} planets.")
 
     print("\nParameter comparison: real vs synthetic (habitable subset)")

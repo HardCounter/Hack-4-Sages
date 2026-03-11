@@ -23,11 +23,17 @@ except ImportError:
 class ExoplanetDataAugmenter:
     """Train a CTGAN on NASA data and conditionally sample habitable worlds."""
 
+    LOG_COLS = [
+        "mass_earth", "semi_major_axis_au", "period_days",
+        "star_teff_K", "star_radius_solar", "star_mass_solar",
+    ]
+
     def __init__(self, epochs: int = 300, batch_size: int = 500):
         self.epochs = epochs
         self.batch_size = batch_size
         self.model: Optional[object] = None
         self.discrete_columns: List[str] = []
+        self._log_transformed: bool = False
 
     # ── data prep ─────────────────────────────────────────────────────────
 
@@ -96,17 +102,27 @@ class ExoplanetDataAugmenter:
         if not _HAS_CTGAN:
             raise RuntimeError("ctgan package is not installed")
 
+        train_data = data.copy()
+
+        # Log-transform heavily right-skewed columns so CTGAN's internal
+        # VGM (variational Gaussian mixture) normalizer can model them
+        # more accurately — critical for mass_earth.
+        self._log_transformed = True
+        for col in self.LOG_COLS:
+            if col in train_data.columns:
+                train_data[col] = np.log1p(train_data[col])
+
         self.model = CTGAN(
             epochs=self.epochs,
-            batch_size=min(self.batch_size, len(data)),
+            batch_size=min(self.batch_size, len(train_data)),
             generator_dim=(256, 256),
             discriminator_dim=(256, 256),
             generator_lr=2e-4,
             discriminator_lr=2e-4,
-            discriminator_steps=1,
+            discriminator_steps=5,
             verbose=True,
         )
-        self.model.fit(data, discrete_columns=self.discrete_columns)
+        self.model.fit(train_data, discrete_columns=self.discrete_columns)
 
     # ── sampling ──────────────────────────────────────────────────────────
 
@@ -118,11 +134,16 @@ class ExoplanetDataAugmenter:
     ) -> pd.DataFrame:
         if self.model is None:
             raise RuntimeError("CTGAN model has not been trained")
-        return self.model.sample(
+        result = self.model.sample(
             n=n_samples,
             condition_column=condition_column,
             condition_value=condition_value,
         )
+        if self._log_transformed:
+            for col in self.LOG_COLS:
+                if col in result.columns:
+                    result[col] = np.expm1(result[col])
+        return result
 
     # ── post-hoc physics filter ───────────────────────────────────────────
 
@@ -180,9 +201,19 @@ class ExoplanetDataAugmenter:
     # ── persistence ───────────────────────────────────────────────────────
 
     def save_model(self, path: str = "models/ctgan_exoplanets.pkl") -> None:
+        payload = {
+            "model": self.model,
+            "log_transformed": self._log_transformed,
+        }
         with open(path, "wb") as f:
-            pickle.dump(self.model, f)
+            pickle.dump(payload, f)
 
     def load_model(self, path: str = "models/ctgan_exoplanets.pkl") -> None:
         with open(path, "rb") as f:
-            self.model = pickle.load(f)
+            payload = pickle.load(f)
+        if isinstance(payload, dict):
+            self.model = payload["model"]
+            self._log_transformed = payload.get("log_transformed", False)
+        else:
+            self.model = payload
+            self._log_transformed = False

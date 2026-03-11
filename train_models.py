@@ -24,6 +24,8 @@ import os
 import sys
 import time
 
+import numpy as np
+
 MODELS_DIR = os.path.join(os.path.dirname(__file__), "models")
 
 
@@ -76,9 +78,10 @@ def train_elm(n_samples: int = 5000, n_ensemble: int = 10, n_neurons: int = 500)
 
 # ── 2. CTGAN ──────────────────────────────────────────────────────────────────
 
-def train_ctgan(epochs: int = 300):
+def train_ctgan(epochs: int = 1000):
     import os
     import warnings
+    import pandas as pd
 
     from modules.data_augmentation import ExoplanetDataAugmenter
     from modules.combined_catalog import DATA_DIR, build_combined_catalog
@@ -105,6 +108,32 @@ def train_ctgan(epochs: int = 300):
     raw = build_combined_catalog()
     print(f"  Combined catalog size: {len(raw)} unique planets")
 
+    # Prepare data in the normalised schema and light class rebalance so the
+    # CTGAN sees more examples of habitable worlds during training.
+    aug = ExoplanetDataAugmenter(epochs=epochs)
+    data = aug.prepare_normalised_data(raw)
+
+    # Noise-augmented upsampling: instead of exact copies, add small
+    # Gaussian perturbations to each replicated habitable row so that
+    # CTGAN sees more distributional diversity during training.
+    hab = data[data["habitable"] == 1]
+    non = data[data["habitable"] == 0]
+    if len(hab) > 0:
+        factor = max(1, 2 * len(non) // max(1, len(hab)))
+        continuous = [c for c in hab.columns if c != "habitable"]
+        hab_augmented = [hab]
+        for _ in range(factor - 1):
+            noisy = hab.copy()
+            for col in continuous:
+                col_std = noisy[col].std()
+                if col_std > 0:
+                    noise = np.random.normal(0, 0.05 * col_std, size=len(noisy))
+                    noisy[col] = np.maximum(noisy[col] + noise, 1e-6)
+            hab_augmented.append(noisy)
+        data_balanced = pd.concat([non] + hab_augmented, ignore_index=True)
+    else:
+        data_balanced = data
+
     # Suppress benign cuBLAS context warnings from PyTorch during GAN training.
     warnings.filterwarnings(
         "ignore",
@@ -112,14 +141,11 @@ def train_ctgan(epochs: int = 300):
         category=UserWarning,
     )
 
-    aug = ExoplanetDataAugmenter(epochs=epochs)
-    data = aug.prepare_normalised_data(raw)
-
     t0 = time.time()
-    aug.train(data)
+    aug.train(data_balanced)
     print(f"  Training completed in {time.time()-t0:.1f}s")
 
-    synth = aug.generate_synthetic_planets(n_samples=5000)
+    synth = aug.generate_synthetic_planets(n_samples=500000)
     valid = aug.validate_synthetic_data(synth)
     print(f"  Generated {len(synth)} → {len(valid)} physically valid synthetics")
 
@@ -181,8 +207,8 @@ def main():
         help="Number of synthetic training samples for ELM (default: 5000)"
     )
     parser.add_argument(
-        "--ctgan-epochs", type=int, default=300,
-        help="CTGAN training epochs (default: 300)"
+        "--ctgan-epochs", type=int, default=600,
+        help="CTGAN training epochs (default: 600)"
     )
     parser.add_argument(
         "--pinn-epochs", type=int, default=5000,
