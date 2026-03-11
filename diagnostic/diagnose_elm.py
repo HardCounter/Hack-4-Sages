@@ -62,6 +62,16 @@ BENCHMARK_PLANETS: Dict[str, Dict] = {
         "albedo": 0.2,
         "tidally_locked": 1,
     },
+    "Cold_super_earth": {
+        "radius_earth": 1.8,
+        "mass_earth": 5.0,
+        "semi_major_axis_au": 1.5,
+        "star_teff_K": 5200.0,
+        "star_radius_solar": 0.86,
+        "insol_earth": 0.22,
+        "albedo": 0.45,
+        "tidally_locked": 0,
+    },
 }
 
 

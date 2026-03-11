@@ -236,49 +236,228 @@ class ELMClimateSurrogate:
         return self
 
 
+# ─── Astrophysically motivated planet regimes ─────────────────────────────────
+
+PLANET_REGIMES: Dict[str, Dict] = {
+    "temperate_g_dwarf": {
+        "description": (
+            "Earth-like rocky planets in the habitable zone of "
+            "G/late-K main-sequence stars."
+        ),
+        "star_teff": (5000, 6100),
+        "star_radius": (0.82, 1.15),
+        "semi_major": (0.7, 1.7),
+        "radius_earth": (0.8, 1.5),
+        "albedo": (0.20, 0.40),
+        "locked_prob": 0.05,
+    },
+    "m_dwarf_locked": {
+        "description": (
+            "Tidally locked rocky planets in the habitable zone of "
+            "M-dwarfs, similar to Proxima Centauri b."
+        ),
+        "star_teff": (2500, 3900),
+        "star_radius": (0.08, 0.62),
+        "semi_major": (0.01, 0.25),
+        "radius_earth": (0.7, 1.6),
+        "albedo": (0.10, 0.45),
+        "locked_prob": 0.95,
+    },
+    "hot_close_in": {
+        "description": (
+            "Hot rocky planets on very tight orbits (a < 0.1 AU) "
+            "around diverse stellar types."
+        ),
+        "star_teff": (3800, 7000),
+        "star_radius": (0.55, 1.80),
+        "semi_major": (0.01, 0.10),
+        "radius_earth": (0.5, 2.0),
+        "albedo": (0.05, 0.25),
+        "locked_prob": 0.85,
+    },
+    "cold_super_earth": {
+        "description": (
+            "Super-Earths on wider orbits with thick, "
+            "volatile-rich atmospheres."
+        ),
+        "star_teff": (3500, 6000),
+        "star_radius": (0.35, 1.15),
+        "semi_major": (1.0, 2.5),
+        "radius_earth": (1.3, 2.5),
+        "albedo": (0.30, 0.65),
+        "locked_prob": 0.02,
+    },
+}
+
+DEFAULT_REGIME_WEIGHTS: Dict[str, float] = {
+    "temperate_g_dwarf": 0.20,
+    "m_dwarf_locked": 0.35,
+    "hot_close_in": 0.25,
+    "cold_super_earth": 0.20,
+}
+
+
 # ─── Analytical training-data generator ───────────────────────────────────────
+
+
+def _mass_from_radius(radius_earth: float, rng: np.random.Generator) -> float:
+    """Broken power-law mass-radius relation (Otegi+ 2020 inspired).
+
+    Rocky (R < 1.5 R_E): M ~ R^3.45
+    Volatile-rich (R >= 1.5 R_E): continuous match with M ~ R^1.75
+    Log-normal scatter of ~15 % captures compositional diversity.
+    """
+    if radius_earth < 1.5:
+        log_m = 3.45 * np.log(radius_earth)
+    else:
+        log_m = 3.45 * np.log(1.5) + 1.75 * np.log(radius_earth / 1.5)
+    return max(np.exp(log_m + rng.normal(0, 0.15)), 0.01)
 
 
 def generate_analytical_training_data(
     n_samples: int = 1000,
     n_lat: int = 32,
     n_lon: int = 64,
+    regime_weights: Optional[Dict[str, float]] = None,
+    verbose: bool = True,
 ) -> Tuple[np.ndarray, np.ndarray]:
     """Produce synthetic (features, temperature-map) pairs.
 
-    Uses a simplified radiative model so the ELM can be bootstrapped
-    without access to ROCKE-3D GCM output.
+    Uses a simplified radiative-equilibrium model to bootstrap ELM
+    training without access to ROCKE-3D GCM output.  Samples are drawn
+    from astrophysically motivated planet *regimes* (see
+    ``PLANET_REGIMES``) to ensure coverage of Earth-like, M-dwarf
+    tidally-locked, hot close-in, and cold super-Earth configurations.
+
+    Parameters
+    ----------
+    n_samples : int
+        Number of synthetic planet samples to generate.
+    n_lat, n_lon : int
+        Grid resolution for the temperature maps.
+    regime_weights : dict, optional
+        Mapping ``regime_name -> weight``.  Keys must be a subset of
+        ``PLANET_REGIMES``.  If *None*, ``DEFAULT_REGIME_WEIGHTS`` is
+        used (35 % M-dwarf locked, 25 % hot close-in, 20 % temperate
+        G-dwarf, 20 % cold super-Earth).
+    verbose : bool
+        Print regime counts and feature summary statistics.
+
+    Returns
+    -------
+    X : ndarray, shape ``(n_valid, 8)``
+        Feature vectors:
+        ``[radius_earth, mass_earth, semi_major_axis_au, star_teff_K,
+        star_radius_solar, insol_earth, albedo, tidally_locked]``.
+    y : ndarray, shape ``(n_valid, n_lat * n_lon)``
+        Flattened temperature maps in Kelvin.
+
+    Notes
+    -----
+    Planet families
+    ~~~~~~~~~~~~~~~
+    * **temperate_g_dwarf** -- Earth-like rocky planets in the HZ of
+      G/late-K stars (T_eff 5000--6100 K).
+    * **m_dwarf_locked** -- Tidally locked rocky worlds in the HZ of
+      M-dwarfs (T_eff 2500--3900 K), like Proxima Centauri b.
+    * **hot_close_in** -- Hot rocky planets on very tight orbits
+      (a < 0.1 AU) around diverse stellar types.
+    * **cold_super_earth** -- Super-Earths on wider orbits (a > 1 AU)
+      with volatile-rich atmospheres.
+
+    Mass-radius relation
+    ~~~~~~~~~~~~~~~~~~~~
+    Broken power law after Otegi+ (2020): rocky (R < 1.5 R_E,
+    M ~ R^3.45) transitioning to volatile-rich (R >= 1.5, M ~ R^1.75)
+    with ~15 % log-normal scatter.
+
+    Stellar parameters
+    ~~~~~~~~~~~~~~~~~~
+    T_eff and R_star are sampled with positive correlation within each
+    regime to approximate the main-sequence relation.
+
+    Temperature maps
+    ~~~~~~~~~~~~~~~~
+    Tidally locked worlds use a sub-stellar irradiation pattern with an
+    atmospheric heat-redistribution factor *f* that increases with
+    planet size and albedo (proxy for atmospheric thickness).
+    Non-locked worlds use a latitude-dependent gradient whose amplitude
+    varies with albedo.
     """
+    if regime_weights is None:
+        regime_weights = DEFAULT_REGIME_WEIGHTS
+
+    rng = np.random.default_rng()
+
     lat = np.linspace(-np.pi / 2, np.pi / 2, n_lat)
     lon = np.linspace(0, 2 * np.pi, n_lon)
     LAT, LON = np.meshgrid(lat, lon, indexing="ij")
 
+    regimes = list(regime_weights.keys())
+    weights = np.array([regime_weights[r] for r in regimes], dtype=float)
+    weights /= weights.sum()
+    regime_indices = rng.choice(len(regimes), size=n_samples, p=weights)
+
     X_features: List[list] = []
     y_maps: List[np.ndarray] = []
+    n_rejected = 0
+    regime_counts: Dict[str, int] = {r: 0 for r in regimes}
 
-    for _ in range(n_samples):
-        star_teff = np.random.uniform(2500, 7000)
-        star_radius = np.random.uniform(0.1, 2.0)
-        semi_major = np.random.uniform(0.01, 2.0)
-        albedo = np.random.uniform(0.05, 0.7)
-        radius_earth = np.random.uniform(0.5, 2.5)
-        mass_earth = radius_earth ** (1 / 0.27)
-        insol = (star_teff / 5778) ** 4 * star_radius**2 / semi_major**2
-        locked = int(np.random.choice([0, 1], p=[0.3, 0.7]))
+    for idx in regime_indices:
+        regime_name = regimes[idx]
+        regime = PLANET_REGIMES[regime_name]
 
+        # --- Stellar parameters (main-sequence correlated) -------------
+        teff_lo, teff_hi = regime["star_teff"]
+        rad_lo, rad_hi = regime["star_radius"]
+        star_teff = float(rng.uniform(teff_lo, teff_hi))
+        teff_frac = (star_teff - teff_lo) / max(teff_hi - teff_lo, 1.0)
+        rad_center = rad_lo + teff_frac * (rad_hi - rad_lo)
+        rad_scatter = 0.08 * (rad_hi - rad_lo)
+        star_radius = float(np.clip(
+            rng.normal(rad_center, rad_scatter), rad_lo, rad_hi,
+        ))
+
+        # --- Orbital & planetary parameters ----------------------------
+        sma_lo, sma_hi = regime["semi_major"]
+        semi_major = float(rng.uniform(sma_lo, sma_hi))
+
+        rp_lo, rp_hi = regime["radius_earth"]
+        radius_earth = float(rng.uniform(rp_lo, rp_hi))
+        mass_earth = _mass_from_radius(radius_earth, rng)
+
+        alb_lo, alb_hi = regime["albedo"]
+        albedo = float(rng.uniform(alb_lo, alb_hi))
+
+        locked = int(rng.random() < regime["locked_prob"])
+
+        # --- Derived quantities ----------------------------------------
+        insol = (star_teff / 5778) ** 4 * star_radius ** 2 / semi_major ** 2
         R_star_m = star_radius * 6.957e8
         a_m = semi_major * 1.496e11
         T_eq = star_teff * np.sqrt(R_star_m / (2 * a_m)) * (1 - albedo) ** 0.25
 
+        if T_eq < 30 or T_eq > 5000:
+            n_rejected += 1
+            continue
+
+        # --- Temperature map -------------------------------------------
         if locked:
+            # Atmospheric heat redistribution heuristic: larger, higher-
+            # albedo planets redistribute heat more efficiently.
+            f_redist = float(np.clip(
+                0.1 + 0.25 * (radius_earth - 0.5) / 2.0 + 0.2 * albedo,
+                0.05, 0.75,
+            ))
             cos_z = np.cos(LAT) * np.cos(LON - np.pi)
             cos_z = np.clip(cos_z, 0, 1)
-            T_max = T_eq * 1.4
-            T_min = max(T_eq * 0.3, 40)
-            temp_map = T_min + (T_max - T_min) * cos_z**0.25
+            T_max = T_eq * (1.4 - 0.4 * f_redist)
+            T_min = max(T_eq * (0.2 + 0.6 * f_redist), 40)
+            temp_map = T_min + (T_max - T_min) * cos_z ** 0.25
         else:
-            temp_map = T_eq * (1 + 0.15 * np.cos(LAT))
-            temp_map += np.random.normal(0, T_eq * 0.02, temp_map.shape)
+            gradient = 0.20 - 0.10 * albedo
+            temp_map = T_eq * (1.0 + gradient * np.cos(LAT))
+            temp_map += rng.normal(0, T_eq * 0.02, temp_map.shape)
 
         features = [
             radius_earth, mass_earth, semi_major, star_teff,
@@ -286,5 +465,26 @@ def generate_analytical_training_data(
         ]
         X_features.append(features)
         y_maps.append(temp_map.flatten())
+        regime_counts[regime_name] += 1
+
+    if verbose:
+        n_valid = len(X_features)
+        print(f"  Regime sampling ({n_valid} valid, {n_rejected} rejected):")
+        for r in regimes:
+            pct = 100 * regime_counts[r] / max(n_valid, 1)
+            print(f"    {r:22s}: {regime_counts[r]:5d} ({pct:5.1f}%)")
+        X_arr = np.array(X_features)
+        feat_names = [
+            "radius_earth", "mass_earth", "semi_major_au",
+            "star_teff_K", "star_radius_Rsun", "insol_earth",
+            "albedo", "tidally_locked",
+        ]
+        print(f"  Feature statistics (n={n_valid}):")
+        for i, name in enumerate(feat_names):
+            vals = X_arr[:, i]
+            print(
+                f"    {name:20s}:  min={vals.min():10.3g}  "
+                f"med={np.median(vals):10.3g}  max={vals.max():10.3g}"
+            )
 
     return np.array(X_features), np.array(y_maps)
