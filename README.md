@@ -57,6 +57,16 @@ pip install torch torchvision torchaudio --index-url https://download.pytorch.or
 pip install -r requirements.txt
 ```
 
+For **AMD GPU on Linux** (ROCm), install the ROCm-enabled PyTorch build instead:
+
+```bash
+# Check your ROCm version first: rocminfo | grep 'ROCm'
+pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/rocm6.2
+pip install -r requirements.txt
+```
+
+`torch.cuda.is_available()` returns `True` with ROCm PyTorch — the exact same code path is used for both NVIDIA and AMD GPUs.
+
 ### 3. Install and configure Ollama
 
 Download Ollama from <https://ollama.com/download> and install it.
