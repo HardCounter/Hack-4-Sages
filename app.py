@@ -3,11 +3,11 @@ Autonomous Exoplanetary Digital Twin — main Streamlit application.
 
 Tabs
 ----
-1. Agent AI          – LLM chat with transparent reasoning
-2. Manual Mode       – slider-driven simulation with live 3-D globe
-3. Planet Catalog    – NASA archive browser + famous-planet gallery
-4. Science Dashboard – HZ diagram, atmospheric cross-section, uncertainty
-5. System            – self-diagnostics, health, export
+1. Agent AI          - LLM chat with transparent reasoning
+2. Manual Mode       - slider-driven simulation with live 3-D globe
+3. Planet Catalog    - NASA archive browser + famous-planet gallery
+4. Science Dashboard - HZ diagram, atmospheric cross-section, uncertainty
+5. System            - self-diagnostics, health, export
 """
 
 import io
@@ -23,9 +23,10 @@ import  streamlit as st
 
 st.set_page_config(
     page_title="Exoplanetary Digital Twin",
-    page_icon="\U0001fa90",
+    page_icon="ET",
     layout="wide",
-    initial_sidebar_state="expanded",
+    initial_sidebar_state="collapsed",
+    menu_items={"About": "Autonomous Exoplanetary Digital Twin — Hack4Sages 2026"},
 )
 
 # ─── Cosmic dark-theme CSS ───────────────────────────────────────────────────
@@ -34,20 +35,103 @@ st.markdown(
     """
 <style>
 @import url('https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@300;400;500;600;700&family=Orbitron:wght@400;500;600;700&display=swap');
+:root{
+  --gap-xs:.4rem;--gap-sm:.75rem;--gap-md:1.25rem;--gap-lg:2rem;
+  --radius-card:12px;
+  --card-bg:rgba(10,14,39,.7);
+  --border-subtle:1px solid rgba(66,165,245,.2);
+  --accent:#00d4ff;--accent-dim:#1a237e;
+  --text-primary:#e0e0e0;--text-muted:#90a4ae;
+}
 .stApp{background:radial-gradient(ellipse at center,#0a0e27 0%,#000 100%)}
-[data-testid="stSidebar"]{background:rgba(10,14,39,.95);border-right:1px solid #1a237e}
-[data-testid="stSidebar"] h1,[data-testid="stSidebar"] h2,[data-testid="stSidebar"] h3,
-[data-testid="stSidebar"] label{color:#b0bec5!important}
+/* ── Hide sidebar completely ── */
+[data-testid="stSidebar"]{display:none!important}
+section[data-testid="stSidebarCollapsedControl"]{display:none!important}
 h1,h2,h3{font-family:'Orbitron',sans-serif!important;color:#e0e0e0!important}
 .stMetricValue{color:#00d4ff!important;font-family:'Orbitron',sans-serif!important}
 .stMetricLabel{color:#90a4ae!important}
+[data-testid="stMetric"]{background:var(--card-bg);border:var(--border-subtle);border-radius:var(--radius-card);padding:var(--gap-sm) var(--gap-md)!important}
 .stButton>button[kind="primary"]{background:linear-gradient(135deg,#1a237e 0%,#0d47a1 100%);border:1px solid #42a5f5;color:#fff;font-family:'Space Grotesk',sans-serif}
 .stButton>button[kind="primary"]:hover{background:linear-gradient(135deg,#283593 0%,#1565c0 100%);border-color:#64b5f6}
-.stTabs [data-baseweb="tab-list"]{gap:8px}
-.stTabs [data-baseweb="tab"]{font-family:'Space Grotesk',sans-serif;color:#90a4ae}
-.stTabs [aria-selected="true"]{color:#00d4ff!important}
-div[data-testid="stChatMessage"]{background:rgba(10,14,39,.6);border:1px solid #1a237e;border-radius:12px}
+/* ── Redesigned tab styling ── */
+.stTabs [data-baseweb="tab-list"]{
+  gap:12px;
+  background:rgba(10,14,39,.6);
+  border:1px solid rgba(66,165,245,.2);
+  border-radius:12px;
+  padding:6px;
+  justify-content:center;
+}
+.stTabs [data-baseweb="tab"]{
+  font-family:'Space Grotesk',sans-serif;
+  color:#90a4ae;
+  background:transparent;
+  border:1px solid transparent;
+  border-radius:8px;
+  padding:8px 24px!important;
+  transition:all .2s ease;
+  font-weight:500;
+  letter-spacing:.03em;
+}
+.stTabs [data-baseweb="tab"]:hover{
+  background:rgba(0,212,255,.06);
+  border-color:rgba(0,212,255,.2);
+  color:#b0bec5;
+}
+.stTabs [aria-selected="true"]{
+  color:#00d4ff!important;
+  background:rgba(0,212,255,.15)!important;
+  border:1px solid rgba(0,212,255,.4)!important;
+  border-radius:8px!important;
+  padding:8px 24px!important;
+  font-weight:600;
+  box-shadow:0 0 12px rgba(0,212,255,.15);
+}
+.stTabs [data-baseweb="tab-highlight"]{display:none!important}
+.stTabs [data-baseweb="tab-border"]{display:none!important}
+div[data-testid="stChatMessage"]{background:rgba(10,14,39,.6);border:1px solid #1a237e;border-radius:12px;max-width:100%;word-wrap:break-word;margin-bottom:var(--gap-sm)}
 .tooltip-term{border-bottom:1px dotted #888;cursor:help;color:#b0bec5}
+[data-testid="stExpanderDetails"]{background:var(--card-bg);border-radius:0 0 var(--radius-card) var(--radius-card);padding:var(--gap-md)}
+div[data-testid="stAlert"]{border-radius:var(--radius-card)!important;margin-bottom:var(--gap-sm)}
+[data-testid="stSlider"] label,[data-testid="stSlider"] span{color:var(--text-primary)!important}
+hr{border-color:rgba(66,165,245,.15)!important;margin:var(--gap-lg) 0}
+[data-testid="stProgressBar"]>div>div{background:var(--accent)!important}
+.js-plotly-plot,.plot-container{max-width:100%!important}
+/* ── Science tab grid cards ── */
+.science-grid{display:grid;grid-template-columns:repeat(2,1fr);gap:1.25rem;margin-top:1rem}
+.science-card{
+  background:rgba(10,14,39,.7);
+  border:1px solid rgba(66,165,245,.2);
+  border-radius:12px;
+  padding:1.25rem;
+  min-height:120px;
+}
+.science-card-full{grid-column:1/-1}
+@media(max-width:768px){
+  .science-grid{grid-template-columns:1fr}
+}
+/* ── About button in header ── */
+.header-bar{display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:.5rem}
+.about-btn{
+  background:rgba(0,212,255,.1);border:1px solid rgba(0,212,255,.3);
+  color:#00d4ff;border-radius:8px;padding:6px 18px;
+  font-family:'Space Grotesk',sans-serif;font-size:.85rem;
+  cursor:pointer;transition:all .2s;text-decoration:none;
+}
+.about-btn:hover{background:rgba(0,212,255,.2);border-color:#00d4ff}
+@media(max-width:640px){
+  .stButton>button{width:100%!important}
+  [data-testid="column"]{min-width:100%!important;flex:unset!important}
+  .stTabs [data-baseweb="tab"]{font-size:.75rem;padding:6px 10px!important}
+}
+/* ── Slider thumb → hexagon ── */
+[data-testid="stSlider"] div[role="slider"]{
+  clip-path:polygon(25% 0%,75% 0%,100% 50%,75% 100%,25% 100%,0% 50%)!important;
+  border-radius:0!important;
+  background:#ff4b4b!important;
+  width:18px!important;
+  height:18px!important;
+}
 </style>""",
     unsafe_allow_html=True,
 )
@@ -62,6 +146,9 @@ _GLOSSARY = {
     "HZ": "Habitable Zone — orbital region where liquid water can exist on the surface.",
     "SEPHI": "Surface Exoplanetary Planetary Habitability Index — multi-criteria habitability score.",
     "HSF": "Habitable Surface Fraction — % of the surface with 273-373 K (liquid water).",
+    "Fulton Gap": "Scarcity of planets between 1.5\u20132.0 R\u2295 separating rocky super-Earths from sub-Neptunes.",
+    "C/O Ratio": "Carbon-to-Oxygen ratio controlling mineralogy; solar \u2248 0.55, C/O \u2265 1 \u2192 carbon planet.",
+    "Sulfur Chemistry": "Dominant sulfur species (H2S, SO2, H2SO4) determined by temperature, pressure, and redox state.",
 }
 
 
@@ -69,6 +156,15 @@ def tip(term: str) -> str:
     expl = _GLOSSARY.get(term, "")
     return f'<span class="tooltip-term" title="{expl}">{term}</span>'
 
+
+# ─── Chart height token ──────────────────────────────────────────────────────
+
+_CHART_H = 320  # px — consistent height for all science charts
+
+# ─── Status icons — change these to swap symbols everywhere ─────────────────
+_ICON_YES  = '<span style="color:#26a641">⬢</span>'  # U+2B22  — positive / pass (green)
+_ICON_NO   = '<span style="color:#e05252">⬡</span>'  # U+2B21  — negative / fail (red)
+_ICON_WARN = '<span style="color:#ff4b4b">⬢</span>'  # U+2B22  — warning (slider red)
 
 # ─── Cached loaders ──────────────────────────────────────────────────────────
 
@@ -101,20 +197,31 @@ for k, v in {
     if k not in st.session_state:
         st.session_state[k] = v
 
-# ─── Header ──────────────────────────────────────────────────────────────────
+# ─── Header with About button ─────────────────────────────────────────────
 
-st.title("\U0001fa90 Autonomous Exoplanetary Digital Twin")
-st.caption("Simulate alien climates in real time with AI-driven physics surrogates.")
-
+st.markdown(
+    '<div class="header-bar">'
+    '<div>'
+    '<h1 style="font-family:\'Orbitron\',sans-serif;'
+    'font-size:clamp(1.4rem,3vw,2.2rem);letter-spacing:.04em;'
+    'color:#e0e0e0;margin:0">Autonomous Exoplanetary Digital Twin</h1>'
+    '<p style="color:#90a4ae;font-size:clamp(.85rem,1.5vw,1rem);'
+    'margin-top:.25rem;margin-bottom:0">'
+    'Simulate alien climates in real time with AI-driven physics surrogates.</p>'
+    '</div>'
+    '</div>',
+    unsafe_allow_html=True,
+)
+st.markdown('<div style="margin-bottom:1rem"></div>', unsafe_allow_html=True)
 # ─── Tabs ────────────────────────────────────────────────────────────────────
 
 tab_agent, tab_manual, tab_catalog, tab_science, tab_system = st.tabs(
     [
-        "\U0001f916 Agent AI",
-        "\U0001f39b\ufe0f Manual Mode",
-        "\U0001f4ca Catalog",
-        "\U0001f52c Science",
-        "\U0001f527 System",
+        "Agent AI",
+        "Manual Mode",
+        "Catalog",
+        "Science",
+        "System",
     ]
 )
 
@@ -168,7 +275,7 @@ with tab_agent:
                         answer = response["output"]
                         steps = response.get("intermediate_steps", [])
                     except Exception as exc:
-                        answer = f"\u26a0\ufe0f Agent unavailable: {exc}"
+                        answer = f"Agent unavailable: {exc}"
                         steps = []
                     st.markdown(answer)
 
@@ -200,7 +307,7 @@ with tab_agent:
 
     # Transparent reasoning panel (enhancement B2)
     with col_reasoning:
-        st.subheader("\U0001f9e0 Reasoning Chain")
+        st.subheader("Reasoning Chain")
         _steps = st.session_state.get("_last_agent_steps", [])
         if _steps:
             for i, (action, obs) in enumerate(_steps):
@@ -211,7 +318,7 @@ with tab_agent:
                         'padding:12px;border-radius:8px;border:1px solid #7c4dff;'
                         'margin-bottom:8px">'
                         '<strong style="color:#b388ff">'
-                        '\U0001f52d Expert Opinion</strong></div>',
+                        'Expert Opinion</strong></div>',
                         unsafe_allow_html=True,
                     )
                     st.markdown(obs[:800])
@@ -229,32 +336,64 @@ with tab_agent:
 # ═══════════════════════════════════════════════════════════════════════════════
 
 with tab_manual:
-    col_params, col_viz = st.columns([1, 2])
+    col_params, col_viz = st.columns([1, 2], gap="large")
 
     with col_params:
-        st.subheader("\U0001f39b\ufe0f Parameters")
-        star_teff = st.slider("Stellar temperature [K]", 2500, 7500, 3042, 50)
-        star_radius = st.slider("Stellar radius [R\u2609]", 0.08, 3.0, 0.141, 0.01)
-        planet_radius = st.slider("Planet radius [R\u2295]", 0.5, 2.5, 1.07, 0.01)
-        planet_mass = st.slider("Planet mass [M\u2295]", 0.1, 15.0, 1.27, 0.1)
-        semi_major = st.slider(
-            "Semi-major axis [AU]", 0.01, 2.0, 0.0485, 0.001, format="%.4f"
-        )
-        albedo = st.slider("Bond albedo", 0.0, 1.0, 0.3, 0.01)
-        locked = st.checkbox("Tidally locked", True)
+        with st.container(border=True):
+            st.markdown("##### Planet Parameters")
+            star_teff = st.slider("Stellar temperature [K]", 2500, 7500, 3042, 50,
+                help="Host star effective temperature in Kelvin")
+            star_radius = st.slider("Stellar radius [R\u2609]", 0.08, 3.0, 0.141, 0.01,
+                help="Host star radius in solar radii")
+            planet_radius = st.slider("Planet radius [R\u2295]", 0.5, 2.5, 1.07, 0.01,
+                help="Planet radius in Earth radii")
+            planet_mass = st.slider("Planet mass [M\u2295]", 0.1, 15.0, 1.27, 0.1,
+                help="Planet mass in Earth masses")
+            semi_major = st.slider(
+                "Semi-major axis [AU]", 0.01, 2.0, 0.0485, 0.001, format="%.4f",
+                help="Orbital semi-major axis in astronomical units",
+            )
+            albedo = st.slider("Bond albedo", 0.0, 1.0, 0.3, 0.01,
+                help="Fraction of incident stellar radiation reflected by the planet")
+            locked = st.checkbox("Tidally locked", True)
+            co_ratio = st.slider("C/O Ratio", 0.1, 1.5, 0.55, 0.01,
+                help="Carbon-to-Oxygen ratio. Solar \u2248 0.55")
+            surface_pressure = st.slider("Surface Pressure (bar)", 0.001, 100.0, 1.0, 0.1,
+                help="Surface atmospheric pressure in bar")
+            _ATM_LABELS = {
+                "H₂-rich (Reducing)": "h2_rich",
+                "O₂-rich (Oxidising)": "o2_rich",
+                "CH₄/CO₂ (Anoxic)":   "ch4_co2",
+            }
+            atm_type = _ATM_LABELS[st.selectbox("Atmosphere Type",
+                list(_ATM_LABELS.keys()),
+                help="Dominant atmospheric regime for sulfur chemistry")]
 
-        run_sim = st.button(
-            "\U0001f680 Run Simulation", type="primary", use_container_width=True
-        )
-        live_mode = st.toggle("Live \u201cWhat If\u201d mode", value=False)
+        btn_col, toggle_col = st.columns([3, 2], gap="small")
+        with btn_col:
+            run_sim = st.button("Run Simulation", type="primary", use_container_width=True)
+        with toggle_col:
+            live_mode = st.toggle('Live "What If" mode', value=False)
 
-    # Compute on button press or live mode change
-    should_compute = run_sim or live_mode
+    # Debounce guard — only re-run in live mode when a parameter actually changed
+    _prev = st.session_state.get("_last_params", {})
+    _curr = dict(
+        star_teff=star_teff, star_radius=star_radius, planet_radius=planet_radius,
+        planet_mass=planet_mass, semi_major=semi_major, albedo=albedo, locked=locked,
+        co_ratio=co_ratio, surface_pressure=surface_pressure, atm_type=atm_type,
+    )
+    _params_changed = (_curr != _prev)
+    should_compute = run_sim or (live_mode and _params_changed)
+    if should_compute:
+        st.session_state["_last_params"] = _curr
 
     if should_compute:
         try:
             with st.status("Running simulation pipeline\u2026", expanded=True) as _pipeline:
                 from modules.astro_physics import (
+                    assess_co_ratio,
+                    assess_sulfur_chemistry,
+                    classify_radius_gap,
                     compute_esi,
                     compute_sephi,
                     equilibrium_temperature,
@@ -268,7 +407,7 @@ with tab_manual:
                 from modules.visualization import generate_eyeball_map
                 from modules.validators import PlanetaryParameters, SimulationOutput
 
-                _pipeline.write("\U0001f6e1\ufe0f Validating parameters\u2026")
+                _pipeline.write("Validating parameters\u2026")
                 PlanetaryParameters(
                     name="Custom",
                     radius_earth=planet_radius,
@@ -278,7 +417,7 @@ with tab_manual:
                     tidally_locked=locked,
                 )
 
-                _pipeline.write("\U0001f9ee Computing habitability indices\u2026")
+                _pipeline.write("Computing habitability indices\u2026")
                 T_eq = equilibrium_temperature(
                     star_teff, star_radius, semi_major, albedo, locked
                 )
@@ -288,9 +427,14 @@ with tab_manual:
                 esi = compute_esi(planet_radius, density, v_esc, T_eq)
                 sephi = compute_sephi(T_eq, planet_mass, planet_radius)
 
+                _pipeline.write("Classifying radius gap, sulfur chemistry, C/O ratio\u2026")
+                rg     = classify_radius_gap(planet_radius)
+                sulfur = assess_sulfur_chemistry(T_eq, surface_pressure, atm_type)
+                co     = assess_co_ratio(co_ratio)
+
                 SimulationOutput(T_eq_K=T_eq, ESI=esi, flux_earth=S_norm)
 
-                _pipeline.write("\U0001f30d Generating climate map (ELM / analytical)\u2026")
+                _pipeline.write("Generating climate map (ELM / analytical)\u2026")
                 gd = GracefulDegradation()
 
                 def _elm_predict():
@@ -319,7 +463,7 @@ with tab_manual:
                 if not gd.validate_temperature_map(temp_map):
                     temp_map = _analytical_fallback()
 
-                _pipeline.write("\U0001f4ca Computing surface fraction\u2026")
+                _pipeline.write("Computing surface fraction\u2026")
                 hsf = habitable_surface_fraction(temp_map)
 
                 st.session_state.temperature_map = temp_map
@@ -339,69 +483,98 @@ with tab_manual:
                     "semi_major": semi_major,
                     "albedo": albedo,
                     "tidally_locked": locked,
+                    "radius_gap": rg,
+                    "sulfur": sulfur,
+                    "co": co,
                 }
                 _pipeline.update(label="Simulation complete", state="complete")
         except Exception as exc:
-            st.error(f"\u274c Validation failed: {exc}")
+            st.error(f"{_ICON_NO} Validation failed: {exc}")
 
     with col_viz:
-        st.subheader("\U0001f30d Visualization")
+        st.subheader("Climate Simulation")
 
         if st.session_state.temperature_map is not None:
             d = st.session_state.current_planet_data
 
-            # ── Animated gauge metrics (enhancement A4) ──
-            g1, g2, g3, g4 = st.columns(4)
-            g1.metric("T_eq", f"{d['T_eq']:.0f} K")
-            g2.metric(
-                "ESI",
-                f"{d['ESI']:.3f}",
-                delta=f"{d['ESI'] - 0.8:+.3f} vs 0.8 threshold",
-            )
-            g3.metric("HSF", f"{d['HSF']:.1%}")
-            g4.metric("Flux", f"{d['flux_earth']:.2f} S\u2295")
+            # ── ESI gauge (left) + 2×2 metric grid (right) ──
+            gauge_col, metrics_col = st.columns([1, 1], gap="medium")
 
-            # ESI gauge (Plotly Indicator)
-            esi_gauge = go.Figure(
-                go.Indicator(
-                    mode="gauge+number",
-                    value=d["ESI"],
-                    gauge=dict(
-                        axis=dict(range=[0, 1]),
-                        bar=dict(color="#00d4ff"),
-                        steps=[
-                            dict(range=[0, 0.4], color="#d73027"),
-                            dict(range=[0.4, 0.7], color="#fee08b"),
-                            dict(range=[0.7, 1.0], color="#1a9850"),
-                        ],
-                        threshold=dict(
-                            line=dict(color="white", width=3),
-                            thickness=0.75,
-                            value=0.8,
+            with gauge_col:
+                esi_gauge = go.Figure(
+                    go.Indicator(
+                        mode="gauge+number",
+                        value=d["ESI"],
+                        gauge=dict(
+                            axis=dict(range=[0, 1]),
+                            bar=dict(color="#00d4ff"),
+                            steps=[
+                                dict(range=[0, 0.4], color="#d73027"),
+                                dict(range=[0.4, 0.7], color="#fee08b"),
+                                dict(range=[0.7, 1.0], color="#1a9850"),
+                            ],
+                            threshold=dict(
+                                line=dict(color="white", width=3),
+                                thickness=0.75,
+                                value=0.8,
+                            ),
                         ),
-                    ),
-                    title=dict(text="Earth Similarity Index", font=dict(size=14)),
+                        title=dict(text="Earth Similarity Index", font=dict(size=12)),
+                        number=dict(font=dict(size=28)),
+                    )
                 )
-            )
-            esi_gauge.update_layout(
-                height=200,
-                margin=dict(l=20, r=20, t=40, b=10),
-                paper_bgcolor="rgba(0,0,0,0)",
-                font=dict(color="white"),
-            )
-            st.plotly_chart(esi_gauge, use_container_width=True)
+                esi_gauge.update_layout(
+                    height=220,
+                    margin=dict(l=20, r=20, t=40, b=10),
+                    paper_bgcolor="rgba(0,0,0,0)",
+                    font=dict(color="white"),
+                )
+                st.plotly_chart(esi_gauge, use_container_width=True)
+
+            with metrics_col:
+                esi_delta = d['ESI'] - 0.8
+                esi_delta_str = f"{esi_delta:+.3f} vs 0.8 threshold"
+                esi_delta_color = "#26a641" if esi_delta >= 0 else "#e05252"
+                st.markdown(
+                    f"""
+<div style="display:grid;grid-template-columns:1fr 1fr;grid-auto-rows:1fr;gap:.75rem;height:100%;align-content:center">
+  <div style="background:rgba(10,14,39,.7);border:1px solid rgba(66,165,245,.2);border-radius:12px;padding:.75rem 1rem;display:flex;flex-direction:column;justify-content:center">
+    <div style="color:#90a4ae;font-size:.8rem">Equilibrium Temp.</div>
+    <div style="color:#00d4ff;font-family:'Orbitron',sans-serif;font-size:1.5rem;font-weight:600">{d['T_eq']:.0f} K</div>
+    <div style="font-size:.75rem;margin-top:.2rem;visibility:hidden">placeholder</div>
+  </div>
+  <div style="background:rgba(10,14,39,.7);border:1px solid rgba(66,165,245,.2);border-radius:12px;padding:.75rem 1rem;display:flex;flex-direction:column;justify-content:center">
+    <div style="color:#90a4ae;font-size:.8rem">Earth Similarity (ESI)</div>
+    <div style="color:#00d4ff;font-family:'Orbitron',sans-serif;font-size:1.5rem;font-weight:600">{d['ESI']:.3f}</div>
+    <div style="color:{esi_delta_color};font-size:.75rem;margin-top:.2rem">{'↑' if esi_delta >= 0 else '↓'} {esi_delta_str}</div>
+  </div>
+  <div style="background:rgba(10,14,39,.7);border:1px solid rgba(66,165,245,.2);border-radius:12px;padding:.75rem 1rem;display:flex;flex-direction:column;justify-content:center">
+    <div style="color:#90a4ae;font-size:.8rem">Habitable Surface</div>
+    <div style="color:#00d4ff;font-family:'Orbitron',sans-serif;font-size:1.5rem;font-weight:600">{d['HSF']:.1%}</div>
+    <div style="font-size:.75rem;margin-top:.2rem;visibility:hidden">placeholder</div>
+  </div>
+  <div style="background:rgba(10,14,39,.7);border:1px solid rgba(66,165,245,.2);border-radius:12px;padding:.75rem 1rem;display:flex;flex-direction:column;justify-content:center">
+    <div style="color:#90a4ae;font-size:.8rem">Stellar Flux</div>
+    <div style="color:#00d4ff;font-family:'Orbitron',sans-serif;font-size:1.5rem;font-weight:600">{d['flux_earth']:.2f} S⊕</div>
+    <div style="font-size:.75rem;margin-top:.2rem;visibility:hidden">placeholder</div>
+  </div>
+</div>""",
+                    unsafe_allow_html=True,
+                )
 
             # SEPHI traffic lights
             sp = d["SEPHI"]
-            _ok = "\u2705"
-            _fail = "\u274c"
-            st.markdown(
-                f"**SEPHI** &nbsp; "
-                f"{_ok if sp['thermal_ok'] else _fail} Thermal &nbsp; "
-                f"{_ok if sp['atmosphere_ok'] else _fail} Atmosphere &nbsp; "
-                f"{_ok if sp['magnetic_ok'] else _fail} Magnetic &nbsp; "
-                f"(Score: **{sp['sephi_score']:.2f}**)"
-            )
+            _ok = _ICON_YES
+            _fail = _ICON_NO
+            with st.container(border=True):
+                st.markdown(
+                    f"**SEPHI** &nbsp; "
+                    f"{_ok if sp['thermal_ok'] else _fail} Thermal &nbsp; "
+                    f"{_ok if sp['atmosphere_ok'] else _fail} Atmosphere &nbsp; "
+                    f"{_ok if sp['magnetic_ok'] else _fail} Magnetic &nbsp; "
+                    f"(Score: **{sp['sephi_score']:.2f}**)",
+                    unsafe_allow_html=True,
+                )
 
             # ISA Interaction & Biosignature False-Positive badges
             try:
@@ -416,27 +589,54 @@ with tab_manual:
                     star_teff, star_radius, semi_major,
                     d["T_eq"], planet_mass, planet_radius,
                 )
-                isa_col, fp_col = st.columns(2)
+                isa_col, fp_col = st.columns(2, gap="medium")
                 with isa_col:
                     isa_icon = (
-                        "\u2705" if isa["isa_score"] >= 0.75 else
-                        "\u26a0\ufe0f" if isa["isa_score"] >= 0.5 else
-                        "\u274c"
+                        _ICON_YES if isa["isa_score"] >= 0.75 else
+                        _ICON_WARN if isa["isa_score"] >= 0.5 else
+                        _ICON_NO
                     )
                     st.markdown(
                         f"**ISA Coupling** {isa_icon} "
-                        f"{isa['isa_assessment']} (score: {isa['isa_score']:.2f})"
+                        f"{isa['isa_assessment']} (score: {isa['isa_score']:.2f})",
+                        unsafe_allow_html=True,
                     )
                 with fp_col:
                     fp_icon = {
-                        "low": "\u2705", "moderate": "\u26a0\ufe0f", "high": "\u274c"
-                    }.get(fp["overall_false_positive_risk"], "\u2753")
+                        "low": _ICON_YES, "moderate": _ICON_WARN, "high": _ICON_NO
+                    }.get(fp["overall_false_positive_risk"], "?")
                     st.markdown(
                         f"**False-Positive Risk** {fp_icon} "
-                        f"{fp['overall_false_positive_risk'].title()}"
+                        f"{fp['overall_false_positive_risk'].title()}",
+                        unsafe_allow_html=True,
                     )
             except Exception:
                 pass
+
+            # ── Radius Gap / Sulfur / C/O classification ──
+            if "radius_gap" in d:
+                rg_d    = d["radius_gap"]
+                sulfur_d = d["sulfur"]
+                co_d    = d["co"]
+                with st.container(border=True):
+                    st.markdown("##### Composition & Atmospheric Classification")
+                    rg_col, sulfur_col, co_col = st.columns(3, gap="medium")
+                    with rg_col:
+                        st.markdown(f"**Radius Class:** {rg_d['label']}")
+                        st.caption(f"Atmosphere retention: `{rg_d['atmosphere_retention']}`")
+                        if rg_d["classification"] == "radius_gap":
+                            st.progress(rg_d["gap_proximity"], text="Gap proximity")
+                    with sulfur_col:
+                        st.markdown(f"**Sulfur:** `{sulfur_d['dominant_gas']}` | `{sulfur_d['regime']}`")
+                        st.caption(f"Surface minerals: {', '.join(sulfur_d['surface_minerals'])}")
+                        if sulfur_d["h2so4_condensation"]:
+                            st.warning("Venus-like H2SO4 clouds predicted")
+                    with co_col:
+                        adjusted_esi = d["ESI"] + co_d["habitability_modifier"]
+                        st.markdown(f"**C/O:** {co_d['label']}")
+                        st.caption(f"ESI adjusted: `{adjusted_esi:.3f}` (modifier: {co_d['habitability_modifier']:+.3f})")
+                        if co_d["classification"] == "carbon_planet":
+                            st.error("Carbon-rich composition \u2014 liquid water unlikely")
 
             # Globe / heatmap toggle
             view_mode = st.radio("View", ["3D Globe", "2D Heatmap"], horizontal=True)
@@ -473,12 +673,9 @@ with tab_manual:
                             float(tmap.min()), float(tmap.max()),
                             float(tmap.mean()), locked,
                         )
-                    state_emoji = {
-                        "Eyeball": "\U0001f441\ufe0f", "Lobster": "\U0001f99e",
-                        "Greenhouse": "\U0001f525", "Temperate": "\U0001f33f",
-                    }.get(cls.get("state", ""), "\u2753")
+                    state_climate = cls.get("state", "Unknown")
                     st.info(
-                        f"**Climate state:** {state_emoji} {cls.get('state', 'Unknown')} "
+                        f"**Climate state:** {state_climate} "
                         f"({cls.get('confidence', '?')} confidence)\n\n"
                         f"{cls.get('reason', '')}"
                     )
@@ -495,9 +692,9 @@ with tab_manual:
                             float(tmap.min()), float(tmap.max()), float(tmap.mean()),
                         )
                     if review.lower().startswith("plausible"):
-                        st.success(f"\u2705 {review}")
+                        st.success(f"⬢ {review}")  # raw icon — st.success can't render HTML
                     elif review.lower().startswith("warning"):
-                        st.warning(f"\u26a0\ufe0f {review}")
+                        st.warning(review)
                     else:
                         st.info(review)
                 except Exception:
@@ -511,11 +708,11 @@ with tab_manual:
 # ═══════════════════════════════════════════════════════════════════════════════
 
 with tab_catalog:
-    st.subheader("\U0001f4ca Habitable-Zone Candidates — NASA Exoplanet Archive")
+    st.subheader("Habitable-Zone Candidates — NASA Exoplanet Archive")
 
     # ── Natural-language ADQL query (Qwen orchestrator) ───────────
     nl_query = st.text_input(
-        "\U0001f50d Search planets in natural language",
+        "Search planets in natural language",
         placeholder="e.g. rocky planets closer than 10 parsecs",
     )
     if nl_query:
@@ -538,24 +735,26 @@ with tab_catalog:
         except Exception as exc:
             st.error(f"ADQL search error: {exc}")
 
-    st.markdown("##### \u2b50 Famous Exoplanets")
+    st.markdown("##### Famous Exoplanets")
     famous = [
-        {"name": "TRAPPIST-1 e", "icon": "\U0001f534", "desc": "Rocky, temperate, tidally locked"},
-        {"name": "Proxima Cen b", "icon": "\U0001f7e0", "desc": "Closest habitable candidate"},
-        {"name": "K2-18 b", "icon": "\U0001f535", "desc": "Water vapour detected (JWST)"},
-        {"name": "Kepler-442 b", "icon": "\U0001f7e2", "desc": "High-ESI super-Earth"},
-        {"name": "TOI-700 d", "icon": "\U0001f7e1", "desc": "Earth-size in HZ (TESS)"},
-        {"name": "LHS 1140 b", "icon": "\U0001f7e3", "desc": "Dense rocky world in HZ"},
+        {"name": "TRAPPIST-1 e", "desc": "Rocky, temperate, tidally locked"},
+        {"name": "Proxima Cen b", "desc": "Closest habitable candidate"},
+        {"name": "K2-18 b",       "desc": "Water vapour detected (JWST)"},
+        {"name": "Kepler-442 b",  "desc": "High-ESI super-Earth"},
+        {"name": "TOI-700 d",     "desc": "Earth-size in HZ (TESS)"},
+        {"name": "LHS 1140 b",    "desc": "Dense rocky world in HZ"},
     ]
-    gcols = st.columns(len(famous))
-    for col, p in zip(gcols, famous):
-        with col:
-            if st.button(
-                f"{p['icon']} {p['name']}",
-                use_container_width=True,
-                help=p["desc"],
-            ):
-                st.session_state["selected_planet"] = p["name"]
+    row1, row2 = famous[:3], famous[3:]
+    for row in (row1, row2):
+        gcols = st.columns(3, gap="medium")
+        for col, p in zip(gcols, row):
+            with col:
+                if st.button(
+                    p["name"],
+                    use_container_width=True,
+                    help=p["desc"],
+                ):
+                    st.session_state["selected_planet"] = p["name"]
 
     if st.session_state.get("selected_planet"):
         with st.spinner(f"Fetching {st.session_state['selected_planet']}\u2026"):
@@ -580,7 +779,7 @@ with tab_catalog:
                 st.error(str(exc))
         st.session_state["selected_planet"] = None
 
-    if st.button("\U0001f4e5 Fetch full NASA catalog"):
+    if st.button("Fetch full NASA catalog"):
         with st.spinner("Querying NASA Exoplanet Archive\u2026"):
             try:
                 from modules.nasa_client import get_habitable_candidates
@@ -635,7 +834,8 @@ with tab_science:
         except Exception:
             hz = {}
 
-        # ── Scientific Narrative (domain expert) ──────────────────
+        # ── Scientific Narrative (domain expert) — full-width card ──
+        _narrative_text = ""
         try:
             from modules.llm_helpers import narrate_science_panel
             with st.spinner("Domain expert writing scientific narrative..."):
@@ -646,185 +846,225 @@ with tab_science:
                     "T_mean_equator": float(equator.mean()),
                     "gradient_K": float(equator.max() - equator.min()),
                 }
-                narrative = narrate_science_panel(
+                _narrative_text = narrate_science_panel(
                     hz_data=hz,
                     cross_section_stats=cs_stats,
                     uncertainty_note="ELM ensemble std-dev or +/-15 K analytical uncertainty",
                 )
-            st.markdown("### Scientific Narrative")
-            st.markdown(narrative)
-            st.markdown("---")
         except Exception:
             pass
 
-        sci1, sci2 = st.columns(2)
-
-        # ── Habitable-Zone diagram (enhancement C1) ──
-        with sci1:
-            st.subheader("Habitable Zone")
-            try:
-                from modules.visualization import create_hz_diagram
-                if hz:
-                    fig_hz = create_hz_diagram(hz, d["semi_major"], d["star_teff"])
-                    st.plotly_chart(fig_hz, use_container_width=True)
-                else:
-                    st.warning("HZ boundaries could not be computed.")
-            except Exception as exc:
-                st.warning(f"HZ diagram unavailable: {exc}")
-
-        # ── ISA Interaction Detail (targets Steinmeyer) ──
-        with sci1:
-            try:
-                from modules.astro_physics import estimate_isa_interaction
-                _p_rad = d.get("planet_radius", 1.0)
-                _p_mass = d.get("planet_mass", 1.0)
-                _locked = d.get("tidally_locked", True)
-                isa = estimate_isa_interaction(_p_mass, _p_rad, d["T_eq"], _locked)
-                st.subheader("Interior-Surface-Atmosphere")
-                ic1, ic2 = st.columns(2)
-                ic1.metric("ISA Score", f"{isa['isa_score']:.2f}")
-                ic2.metric("Outgassing", f"{isa['outgassing']['outgassing_rate_earth']:.2f}x Earth")
-                _ok = "\u2705"
-                _fail = "\u274c"
-                st.markdown(
-                    f"{_ok if isa['plate_tectonics_likely'] else _fail} Plate tectonics &nbsp; "
-                    f"{_ok if isa['carbonate_silicate_cycle'] else _fail} C-Si cycle &nbsp; "
-                    f"{_ok if isa['water_cycling'] else _fail} Water cycling &nbsp; "
-                    f"{_ok if isa['volatile_retention'] else _fail} Volatile retention"
-                )
-            except Exception:
-                pass
-
-        # ── Biosignature False-Positive Assessment (targets Petkowski) ──
-        with sci2:
-            try:
-                from modules.astro_physics import assess_biosignature_false_positives
-                _p_rad = d.get("planet_radius", 1.0)
-                _p_mass = d.get("planet_mass", 1.0)
-                fp = assess_biosignature_false_positives(
-                    d["star_teff"], _star_rad, d["semi_major"],
-                    d["T_eq"], _p_mass, _p_rad,
-                )
-                st.subheader("Photochemical False Positives")
-                fp1, fp2, fp3 = st.columns(3)
-                fp1.metric("O\u2082 risk", fp["o2_false_positive_risk"].title())
-                fp2.metric("CH\u2084 risk", fp["ch4_false_positive_risk"].title())
-                fp3.metric("UV flux", f"{fp['uv_environment']['uv_flux_earth']:.1f}x Earth")
-                if fp["risk_flags"]:
-                    for flag in fp["risk_flags"]:
-                        st.warning(f"\u26a0\ufe0f {flag}")
-                st.info(fp["recommendation"])
-            except Exception:
-                pass
-
-        sci3, sci4 = st.columns(2)
-
-        # ── Atmospheric cross-section along terminator (enhancement C4) ──
-        with sci4:
-            st.subheader("Terminator Cross-Section")
-            n_lat = tmap.shape[0]
-            equator_idx = n_lat // 2
-            profile = tmap[equator_idx, :]
-            lons = np.linspace(0, 360, len(profile))
-
-            fig_cs = go.Figure()
-            fig_cs.add_trace(
-                go.Scatter(x=lons, y=profile, mode="lines", name="ELM / Analytical")
-            )
-            fig_cs.add_hline(y=273, line_dash="dash", line_color="#41ab5d",
-                             annotation_text="273 K (freezing)")
-            fig_cs.add_hline(y=373, line_dash="dash", line_color="#d73027",
-                             annotation_text="373 K (boiling)")
-            fig_cs.update_layout(
-                xaxis_title="Longitude [\u00b0]",
-                yaxis_title="Temperature [K]",
-                paper_bgcolor="black",
-                plot_bgcolor="rgba(0,0,0,0)",
-                font=dict(color="white"),
-                height=300,
-                margin=dict(l=40, r=20, t=30, b=40),
-            )
-            st.plotly_chart(fig_cs, use_container_width=True)
-
-        # ── Uncertainty dashboard (conformal prediction) ──
-        st.subheader("Uncertainty Estimate")
-        _elm_ci_shown = False
+        # ── Precompute data for all science cards ──
+        _isa_data = None
         try:
-            elm = _load_elm()
-            if elm.models:
-                _p_params = {
-                    "radius_earth": d.get("planet_radius", 1.0),
-                    "mass_earth": d.get("planet_mass", 1.0),
-                    "semi_major_axis_au": d.get("semi_major", 0.05),
-                    "star_teff_K": d.get("star_teff", 3000),
-                    "star_radius_solar": d.get("star_radius", 0.14),
-                    "insol_earth": d.get("flux_earth", 1.0),
-                    "albedo": d.get("albedo", 0.3),
-                    "tidally_locked": int(d.get("tidally_locked", True)),
-                }
-                mean_map, lower_map, upper_map = elm.predict_from_params_with_ci(
-                    _p_params, alpha=0.1,
-                )
-                ci_width = float((upper_map - lower_map).mean())
-                st.markdown(
-                    "**Conformal prediction** (90% coverage interval from ELM ensemble):"
-                )
-                uc1, uc2, uc3, uc4 = st.columns(4)
-                uc1.metric("T mean", f"{float(mean_map.mean()):.0f} K")
-                uc2.metric("CI width (avg)", f"\u00b1{ci_width/2:.1f} K")
-                uc3.metric("CI lower bound", f"{float(lower_map.mean()):.0f} K")
-                uc4.metric("CI upper bound", f"{float(upper_map.mean()):.0f} K")
-                _elm_ci_shown = True
+            from modules.astro_physics import estimate_isa_interaction
+            _p_rad = d.get("planet_radius", 1.0)
+            _p_mass = d.get("planet_mass", 1.0)
+            _locked = d.get("tidally_locked", True)
+            _isa_data = estimate_isa_interaction(_p_mass, _p_rad, d["T_eq"], _locked)
         except Exception:
             pass
-        if not _elm_ci_shown:
-            st.markdown(
-                "Analytical model: static uncertainty estimates (ELM not loaded)."
+
+        _fp_data = None
+        try:
+            from modules.astro_physics import assess_biosignature_false_positives
+            _p_rad = d.get("planet_radius", 1.0)
+            _p_mass = d.get("planet_mass", 1.0)
+            _fp_data = assess_biosignature_false_positives(
+                d["star_teff"], _star_rad, d["semi_major"],
+                d["T_eq"], _p_mass, _p_rad,
             )
-            uncert_cols = st.columns(3)
-            uncert_cols[0].metric("T_eq \u00b1", "\u00b115 K (albedo uncertainty)")
-            uncert_cols[1].metric("ESI \u00b1", "\u00b10.05 (propagated)")
-            uncert_cols[2].metric("HSF \u00b1", "\u00b15 pp")
+        except Exception:
+            pass
 
-        # ── Compare with Earth (domain expert) ──────────────────
-        if st.button("\U0001f30d Compare with Earth"):
+        # ── Grid layout using columns ──
+        # Row 1: full-width Scientific Narrative
+        if _narrative_text:
+            with st.container(border=True):
+                st.markdown("### Scientific Narrative")
+                st.markdown(_narrative_text)
+
+        # Row 2: HZ diagram | False Positives
+        row2_left, row2_right = st.columns(2, gap="medium")
+
+        with row2_left:
+            with st.container(border=True):
+                if _isa_data:
+                    isa = _isa_data
+                    st.subheader("Interior-Surface-Atmosphere")
+                    ic1, ic2 = st.columns(2)
+                    ic1.metric("ISA Score", f"{isa['isa_score']:.2f}")
+                    ic2.metric("Outgassing", f"{isa['outgassing']['outgassing_rate_earth']:.2f}x Earth")
+                    _ok = _ICON_YES
+                    _fail = _ICON_NO
+                    st.markdown(
+                        f"{_ok if isa['plate_tectonics_likely'] else _fail} Plate tectonics &nbsp; "
+                        f"{_ok if isa['carbonate_silicate_cycle'] else _fail} C-Si cycle &nbsp; "
+                        f"{_ok if isa['water_cycling'] else _fail} Water cycling &nbsp; "
+                        f"{_ok if isa['volatile_retention'] else _fail} Volatile retention",
+                        unsafe_allow_html=True,
+                    )
+                else:
+                    st.subheader("Interior-Surface-Atmosphere")
+                    st.caption("Data unavailable.")
+
+        with row2_right:
+            with st.container(border=True):
+                if _fp_data:
+                    fp = _fp_data
+                    st.subheader("Photochemical False Positives")
+                    fp1, fp2, fp3 = st.columns(3)
+                    fp1.metric("O\u2082 risk", fp["o2_false_positive_risk"].title())
+                    fp2.metric("CH\u2084 risk", fp["ch4_false_positive_risk"].title())
+                    fp3.metric("UV flux", f"{fp['uv_environment']['uv_flux_earth']:.1f}x Earth")
+                    if fp["risk_flags"]:
+                        for flag in fp["risk_flags"]:
+                            st.warning(flag)
+                    st.info(fp["recommendation"])
+                else:
+                    st.subheader("Photochemical False Positives")
+                    st.caption("Data unavailable.")
+
+        # Row 3: ISA Interaction | Terminator Cross-Section
+        row3_left, row3_right = st.columns(2, gap="medium")
+
+        with row3_left:
+            with st.container(border=True):
+                st.subheader("Habitable Zone")
+                try:
+                    from modules.visualization import create_hz_diagram
+                    if hz:
+                        fig_hz = create_hz_diagram(hz, d["semi_major"], d["star_teff"])
+                        st.plotly_chart(fig_hz, use_container_width=True)
+                    else:
+                        st.warning("HZ boundaries could not be computed.")
+                except Exception as exc:
+                    st.warning(f"HZ diagram unavailable: {exc}")
+
+        with row3_right:
+            with st.container(border=True):
+                st.subheader("Terminator Cross-Section")
+                n_lat = tmap.shape[0]
+                equator_idx = n_lat // 2
+                profile = tmap[equator_idx, :]
+                lons = np.linspace(0, 360, len(profile))
+
+                fig_cs = go.Figure()
+                fig_cs.add_trace(
+                    go.Scatter(x=lons, y=profile, mode="lines", name="ELM / Analytical")
+                )
+                fig_cs.add_hline(y=273, line_dash="dash", line_color="#41ab5d",
+                                 annotation_text="273 K (freezing)")
+                fig_cs.add_hline(y=373, line_dash="dash", line_color="#d73027",
+                                 annotation_text="373 K (boiling)")
+                fig_cs.update_layout(
+                    xaxis_title="Longitude [\u00b0]",
+                    yaxis_title="Temperature [K]",
+                    paper_bgcolor="black",
+                    plot_bgcolor="rgba(0,0,0,0)",
+                    font=dict(color="white"),
+                    height=_CHART_H,
+                    margin=dict(l=40, r=20, t=30, b=40),
+                )
+                st.plotly_chart(fig_cs, use_container_width=True)
+
+        # Row 4: Uncertainty Estimate (full-width)
+        with st.container(border=True):
+            st.subheader("Uncertainty Estimate")
+            _elm_ci_shown = False
             try:
-                from modules.llm_helpers import compare_planets
-                earth_params = {
-                    "name": "Earth",
-                    "T_eq": 255, "ESI": 1.0, "SEPHI": {"sephi_score": 1.0},
-                    "HSF": 0.65, "flux_earth": 1.0,
-                    "radius_earth": 1.0, "mass_earth": 1.0,
-                    "semi_major_au": 1.0, "star_teff": 5778,
-                }
-                with st.spinner("Domain expert comparing with Earth..."):
-                    comp = compare_planets(d, earth_params)
-                st.markdown(comp)
+                elm = _load_elm()
+                if elm.models:
+                    _p_params = {
+                        "radius_earth": d.get("planet_radius", 1.0),
+                        "mass_earth": d.get("planet_mass", 1.0),
+                        "semi_major_axis_au": d.get("semi_major", 0.05),
+                        "star_teff_K": d.get("star_teff", 3000),
+                        "star_radius_solar": d.get("star_radius", 0.14),
+                        "insol_earth": d.get("flux_earth", 1.0),
+                        "albedo": d.get("albedo", 0.3),
+                        "tidally_locked": int(d.get("tidally_locked", True)),
+                    }
+                    mean_map, lower_map, upper_map = elm.predict_from_params_with_ci(
+                        _p_params, alpha=0.1,
+                    )
+                    ci_width = float((upper_map - lower_map).mean())
+                    st.markdown(
+                        "**Conformal prediction** (90% coverage interval from ELM ensemble):"
+                    )
+                    uc1, uc2, uc3, uc4 = st.columns(4)
+                    uc1.metric("T mean", f"{float(mean_map.mean()):.0f} K")
+                    uc2.metric("CI width (avg)", f"\u00b1{ci_width/2:.1f} K")
+                    uc3.metric("CI lower bound", f"{float(lower_map.mean()):.0f} K")
+                    uc4.metric("CI upper bound", f"{float(upper_map.mean()):.0f} K")
+                    _elm_ci_shown = True
             except Exception:
-                st.caption("*Comparison unavailable (Ollama not running).*")
+                pass
+            if not _elm_ci_shown:
+                st.markdown(
+                    "Analytical model: static uncertainty estimates (ELM not loaded)."
+                )
+                uncert_cols = st.columns(3)
+                uncert_cols[0].metric("T_eq \u00b1", "\u00b115 K (albedo uncertainty)")
+                uncert_cols[1].metric("ESI \u00b1", "\u00b10.05 (propagated)")
+                uncert_cols[2].metric("HSF \u00b1", "\u00b15 pp")
 
-        # ── Planetary soundscape (enhancement F1) ──
-        st.subheader("\U0001f50a Planetary Soundscape")
-        if st.button("Generate sound"):
-            from scipy.io import wavfile
+        # Row 5: Compare with Earth | Planetary Soundscape
+        st.markdown(
+            """<style>
+            div[data-testid="stHorizontalBlock"]:has(> div > div > div[data-testid="stVerticalBlockBorderWrapper"])
+            > div { display:flex; flex-direction:column; }
+            div[data-testid="stHorizontalBlock"]:has(> div > div > div[data-testid="stVerticalBlockBorderWrapper"])
+            > div > div[data-testid="stVerticalBlock"] { flex:1; }
+            div[data-testid="stHorizontalBlock"]:has(> div > div > div[data-testid="stVerticalBlockBorderWrapper"])
+            div[data-testid="stVerticalBlockBorderWrapper"] { height:100%; box-sizing:border-box; }
+            </style>""",
+            unsafe_allow_html=True,
+        )
+        row5_left, row5_right = st.columns(2, gap="medium")
 
-            equator = tmap[tmap.shape[0] // 2, :]
-            T_lo, T_hi = equator.min(), equator.max()
-            dur, sr = 5.0, 22050
-            freqs = 200 + (equator - T_lo) / max(T_hi - T_lo, 1) * 1800
-            t_total = np.linspace(0, dur, int(sr * dur))
-            spf = len(t_total) // len(freqs)
-            audio = np.concatenate(
-                [
-                    0.3 * np.sin(2 * np.pi * f * np.linspace(0, spf / sr, spf))
-                    for f in freqs
-                ]
-            )[: len(t_total)]
-            audio_i16 = (audio * 32767).astype(np.int16)
+        with row5_left:
+            with st.container(border=True):
+                st.subheader("Compare with Earth")
+                if st.button("Compare with Earth"):
+                    try:
+                        from modules.llm_helpers import compare_planets
+                        earth_params = {
+                            "name": "Earth",
+                            "T_eq": 255, "ESI": 1.0, "SEPHI": {"sephi_score": 1.0},
+                            "HSF": 0.65, "flux_earth": 1.0,
+                            "radius_earth": 1.0, "mass_earth": 1.0,
+                            "semi_major_au": 1.0, "star_teff": 5778,
+                        }
+                        with st.spinner("Domain expert comparing with Earth..."):
+                            comp = compare_planets(d, earth_params)
+                        st.markdown(comp)
+                    except Exception:
+                        st.caption("*Comparison unavailable (Ollama not running).*")
 
-            buf = io.BytesIO()
-            wavfile.write(buf, sr, audio_i16)
-            st.audio(buf.getvalue(), format="audio/wav")
+        with row5_right:
+            with st.container(border=True):
+                st.subheader("Planetary Soundscape")
+                if st.button("Generate sound"):
+                    from scipy.io import wavfile
+
+                    equator = tmap[tmap.shape[0] // 2, :]
+                    T_lo, T_hi = equator.min(), equator.max()
+                    dur, sr = 5.0, 22050
+                    freqs = 200 + (equator - T_lo) / max(T_hi - T_lo, 1) * 1800
+                    t_total = np.linspace(0, dur, int(sr * dur))
+                    spf = len(t_total) // len(freqs)
+                    audio = np.concatenate(
+                        [
+                            0.3 * np.sin(2 * np.pi * f * np.linspace(0, spf / sr, spf))
+                            for f in freqs
+                        ]
+                    )[: len(t_total)]
+                    audio_i16 = (audio * 32767).astype(np.int16)
+
+                    buf = io.BytesIO()
+                    wavfile.write(buf, sr, audio_i16)
+                    st.audio(buf.getvalue(), format="audio/wav")
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -832,69 +1072,69 @@ with tab_science:
 # ═══════════════════════════════════════════════════════════════════════════════
 
 with tab_system:
-    st.subheader("\U0001f527 System Health & Diagnostics")
+    st.subheader("System Health & Diagnostics")
 
-    if st.button("\U0001f9ea Run Self-Diagnostics"):
+    if st.button("Run Self-Diagnostics"):
         checks = {}
 
         # 1. NASA API
         with st.status("Running diagnostics\u2026", expanded=True) as status:
-            st.write("\U0001f4e1 Testing NASA API\u2026")
+            st.write("Testing NASA API...")
             try:
                 from modules.nasa_client import get_planet_data
                 earth_test = get_planet_data("Proxima Cen b")
-                checks["NASA API"] = "\u2705" if earth_test is not None else "\u26a0\ufe0f"
+                checks["NASA API"] = _ICON_YES if earth_test is not None else _ICON_WARN
             except Exception:
-                checks["NASA API"] = "\u274c"
+                checks["NASA API"] = _ICON_NO
 
             # 2. T_eq for Earth
-            st.write("\U0001f9ee Computing T_eq for Earth sanity check\u2026")
+            st.write("Computing T_eq for Earth sanity check...")
             try:
                 from modules.astro_physics import equilibrium_temperature
                 t_earth = equilibrium_temperature(5778, 1.0, 1.0, 0.3, False)
                 checks["T_eq(Earth)"] = (
-                    f"\u2705 {t_earth:.1f} K" if 240 < t_earth < 270 else f"\u26a0\ufe0f {t_earth:.1f} K"
+                    f"{_ICON_YES} {t_earth:.1f} K" if 240 < t_earth < 270 else f"{_ICON_WARN} {t_earth:.1f} K"
                 )
             except Exception as exc:
-                checks["T_eq(Earth)"] = f"\u274c {exc}"
+                checks["T_eq(Earth)"] = f"{_ICON_NO} {exc}"
 
             # 3. Pydantic rejection
-            st.write("\U0001f6e1\ufe0f Testing Pydantic guardrail\u2026")
+            st.write("Testing Pydantic guardrail...")
             try:
                 from modules.validators import PlanetaryParameters
                 PlanetaryParameters(
                     name="bad", radius_earth=100, semi_major_axis=1, albedo=0.3
                 )
-                checks["Pydantic guard"] = "\u274c should have rejected"
+                checks["Pydantic guard"] = f"{_ICON_NO} should have rejected"
             except Exception:
-                checks["Pydantic guard"] = "\u2705 rejected invalid input"
+                checks["Pydantic guard"] = f"{_ICON_YES} rejected invalid input"
 
             # 4. ELM model
-            st.write("\U0001f9e0 Checking ELM model\u2026")
+            st.write("Checking ELM model...")
             try:
                 from modules.elm_surrogate import ELMClimateSurrogate
                 m = ELMClimateSurrogate()
                 m.load("models/elm_ensemble.pkl")
-                checks["ELM model"] = "\u2705 loaded"
+                checks["ELM model"] = f"{_ICON_YES} loaded"
             except FileNotFoundError:
-                checks["ELM model"] = "\u26a0\ufe0f not trained yet"
+                checks["ELM model"] = f"{_ICON_WARN} not trained yet"
             except Exception as exc:
-                checks["ELM model"] = f"\u274c {exc}"
+                checks["ELM model"] = f"{_ICON_NO} {exc}"
 
             # 5. Ollama
-            st.write("\U0001f916 Checking Ollama\u2026")
+            st.write("Checking Ollama...")
             try:
                 import ollama as _oll
                 tags = _oll.list()
                 names = [m.model for m in tags.models] if hasattr(tags, "models") else []
-                checks["Ollama"] = f"\u2705 {len(names)} models: {', '.join(names[:5])}"
+                checks["Ollama"] = f"{_ICON_YES} {len(names)} models: {', '.join(names[:5])}"
             except Exception as exc:
-                checks["Ollama"] = f"\u274c {exc}"
+                checks["Ollama"] = f"{_ICON_NO} {exc}"
 
             status.update(label="Diagnostics complete", state="complete")
 
         for k, v in checks.items():
-            st.markdown(f"- **{k}:** {v}")
+            st.markdown(f"- **{k}:** {v}", unsafe_allow_html=True)
 
     # ── Export (enhancement A7) ──
     st.subheader("Export")
@@ -903,12 +1143,13 @@ with tab_system:
 
         fig_export = create_3d_globe(st.session_state.temperature_map, "Export")
         html_bytes = fig_export.to_html(include_plotlyjs="cdn").encode()
-        st.download_button(
-            "\U0001f4be Download interactive HTML globe",
-            data=html_bytes,
-            file_name="planet_globe.html",
-            mime="text/html",
-        )
+        with st.container(border=True):
+            st.download_button(
+                "Download interactive HTML globe",
+                data=html_bytes,
+                file_name="planet_globe.html",
+                mime="text/html",
+            )
     else:
         st.info("Run a simulation to enable export.")
 
@@ -972,3 +1213,25 @@ flowchart TB
             "docker run -p 8501:8501 --gpus all exo-twin",
             language="bash",
         )
+
+# ─── About section (outside tabs so scroll always works) ────────────────────
+
+st.markdown('<div id="about-section"></div>', unsafe_allow_html=True)
+st.markdown("---")
+with st.expander("About", expanded=False):
+    st.markdown("""
+**Autonomous Exoplanetary Digital Twin** was built for the Hack4Sages 2026 hackathon.
+
+Source code: [github.com/HardCounter/Hack-4-Sages](https://github.com/HardCounter/Hack-4-Sages)
+
+LinkedIn: [HardCounter Team](https://www.linkedin.com/company/hardcounter-team/)
+
+                
+| Name | GitHub | LinkedIn |
+|------|--------|----------|
+| Aleksander | [Ale-Jez](https://github.com/Ale-Jez/) | [![LinkedIn](https://img.shields.io/badge/LinkedIn-0077B5?style=flat&logo=linkedin&logoColor=white)](https://www.linkedin.com/in/aleksander-jezowski) |
+| Denis | [DenisLisovytskiy](https://github.com/DenisLisovytskiy) | [![LinkedIn](https://img.shields.io/badge/LinkedIn-0077B5?style=flat&logo=linkedin&logoColor=white)](https://www.linkedin.com/in/denis-lisovytskiy-738b13232/) |
+| Piotr | [Piotereko](https://github.com/Piotereko) | [![LinkedIn](https://img.shields.io/badge/LinkedIn-0077B5?style=flat&logo=linkedin&logoColor=white)](https://www.linkedin.com/in/piotr-czechowski4/) |
+| Rafał | [lasotar](https://github.com/lasotar) | [![LinkedIn](https://img.shields.io/badge/LinkedIn-0077B5?style=flat&logo=linkedin&logoColor=white)](https://www.linkedin.com/in/rafal-lasota/) |         
+
+""")

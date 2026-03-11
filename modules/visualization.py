@@ -135,7 +135,7 @@ def create_3d_globe(
         )
 
     # Rotation animation frames
-    n_frames = 36
+    n_frames = 100
     frames = []
     for k in range(n_frames):
         angle = 2 * np.pi * k / n_frames
