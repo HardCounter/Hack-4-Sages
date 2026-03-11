@@ -55,11 +55,11 @@ else:
 
 **Logic to implement (three atmosphere types):**
 
-| atmosphere_type | dominant sulfur species | surface minerals |
-|---|---|---|
-| `h2_rich` | H₂S (cool), SO₂ (>600 K) | pyrite (FeS₂) if cool; elemental S if mid; SO₂ ice if cold |
-| `o2_rich` | SO₂, H₂SO₄ aerosols (T>400 K + high P) | anhydrite/gypsum (CaSO₄) |
-| `ch4_co2` | COS, H₂S, trace SO₂ | siderite, mixed sulfides |
+| atmosphere_type | dominant sulfur species                | surface minerals                                           |
+| --------------- | -------------------------------------- | ---------------------------------------------------------- |
+| `h2_rich`       | H₂S (cool), SO₂ (>600 K)               | pyrite (FeS₂) if cool; elemental S if mid; SO₂ ice if cold |
+| `o2_rich`       | SO₂, H₂SO₄ aerosols (T>400 K + high P) | anhydrite/gypsum (CaSO₄)                                   |
+| `ch4_co2`       | COS, H₂S, trace SO₂                    | siderite, mixed sulfides                                   |
 
 **Temperature thresholds (approximate):**
 - `h2_rich`: T < 400 K → H₂S dominant; 400–700 K → mixed; > 700 K → SO₂ dominant
@@ -662,14 +662,14 @@ with st.sidebar:
 
 ### 7-I — Typography & colour consistency audit
 
-| Element | Current issue | Fix |
-|---|---|---|
-| `st.subheader` in col_viz | "Visualization" — generic | Change to "🌍 Climate Simulation" |
-| `st.subheader` in col_params | "🎛️ Parameters" — already good | Keep |
-| `st.markdown(f"**SEPHI** ...")` | Bare markdown, no visual grouping | Wrap in `st.container(border=True)` |
-| ISA / FP badge block | `isa_col, fp_col = st.columns(2)` — no gap | Add `gap="medium"` |
-| Tab 4 `sci1, sci2 = st.columns(2)` | No gap | Add `gap="large"` |
-| Tab 4 `sci3, sci4 = st.columns(2)` | `sci3` is unused dead code | Remove or use for Fulton-Gap plot |
+| Element                            | Current issue                              | Fix                                 |
+| ---------------------------------- | ------------------------------------------ | ----------------------------------- |
+| `st.subheader` in col_viz          | "Visualization" — generic                  | Change to "🌍 Climate Simulation"    |
+| `st.subheader` in col_params       | "🎛️ Parameters" — already good              | Keep                                |
+| `st.markdown(f"**SEPHI** ...")`    | Bare markdown, no visual grouping          | Wrap in `st.container(border=True)` |
+| ISA / FP badge block               | `isa_col, fp_col = st.columns(2)` — no gap | Add `gap="medium"`                  |
+| Tab 4 `sci1, sci2 = st.columns(2)` | No gap                                     | Add `gap="large"`                   |
+| Tab 4 `sci3, sci4 = st.columns(2)` | `sci3` is unused dead code                 | Remove or use for Fulton-Gap plot   |
 
 ---
 
@@ -717,34 +717,34 @@ The current codebase uses emoji extensively — in tab labels, button text, subh
 
 **Full inventory of emoji to remove/replace:**
 
-| Location | Current | Replace with |
-|---|---|---|
-| `st.set_page_config(page_icon=...)` | `"\U0001fa90"` (🪐) | `"ET"` or `"EX"` |
-| `st.title(...)` | `"🪐 Autonomous..."` | `"Autonomous Exoplanetary Digital Twin"` |
-| Tab labels | `"🤖 Agent AI"`, `"🎛️ Manual Mode"`, `"📊 Catalog"`, `"🔬 Science"`, `"🔧 System"` | `"Agent AI"`, `"Manual Mode"`, `"Catalog"`, `"Science"`, `"System"` |
-| Sidebar branding (7-H) | `"🪐 EXOTWIN"` | `"EXOTWIN"` |
-| `run_sim` button | `"🚀 Run Simulation"` | `"Run Simulation"` |
-| `st.subheader("🧠 Reasoning Chain")` | leading emoji | `"Reasoning Chain"` |
-| SEPHI traffic-lights | `"\u2705"` / `"\u274c"` checkmarks | **KEEP as-is** — ✅ / ❌ are preserved by design decision |
-| ISA / FP badges | `"\u2705"` / `"\u274c"` / `"\u26a0\ufe0f"` | **KEEP** ✅ / ❌; replace `"\u26a0\ufe0f"` (⚠️) with `"WARN"` |
-| `_ok = "\u2705"` / `_fail = "\u274c"` variables | Unicode emoji | **KEEP** — both ✅ and ❌ are intentionally retained |
-| `state_emoji` dict in classify_climate_state block | all emoji other than ✅/❌ | Remove all entries except any that map to ✅/❌; omit other icons |
-| Famous-planet icons | `"\U0001f534"` etc. | Remove icon column entirely, keep planet name only |
-| `discover_most_habitable` button | no emoji — already clean | — |
-| `st.warning("⚠️ Venus-like...")` | leading `⚠️` | `st.warning("Venus-like H2SO4 clouds predicted")` — Streamlit adds its own icon |
-| `st.error("Carbon-rich...")` | no leading emoji here | already clean |
-| Status pipeline writes | `"\U0001f6e1\ufe0f Validating..."` etc. | `"Validating parameters..."` etc. |
-| `st.subheader("📊 Habitable-Zone Candidates")` | leading emoji | `"Habitable-Zone Candidates — NASA Exoplanet Archive"` |
-| `st.markdown("##### ⭐ Famous Exoplanets")` | `⭐` | `"##### Famous Exoplanets"` |
-| `st.subheader("🔊 Planetary Soundscape")` | `🔊` | `"Planetary Soundscape"` |
-| Generate sound button | `"Generate sound"` — clean | — |
-| Export download button | `"📥 Download..."` | `"Download interactive HTML globe"` |
-| Diagnostics `st.button` | `"🧪 Run Self-Diagnostics"` | `"Run Self-Diagnostics"` |
-| Diagnostics `st.write` calls | all have leading emoji | strip emoji, keep text |
-| Compare with Earth button | `"🌍 Compare with Earth"` | `"Compare with Earth"` |
-| Fetch NASA catalog button | `"📥 Fetch full NASA catalog"` | `"Fetch full NASA catalog"` |
-| `architecture diagram` expander | heading text clean | — |
-| Docker expander | heading text clean | — |
+| Location                                           | Current                                                                       | Replace with                                                                    |
+| -------------------------------------------------- | ----------------------------------------------------------------------------- | ------------------------------------------------------------------------------- |
+| `st.set_page_config(page_icon=...)`                | `"\U0001fa90"` (🪐)                                                            | `"ET"` or `"EX"`                                                                |
+| `st.title(...)`                                    | `"🪐 Autonomous..."`                                                           | `"Autonomous Exoplanetary Digital Twin"`                                        |
+| Tab labels                                         | `"🤖 Agent AI"`, `"🎛️ Manual Mode"`, `"📊 Catalog"`, `"🔬 Science"`, `"🔧 System"` | `"Agent AI"`, `"Manual Mode"`, `"Catalog"`, `"Science"`, `"System"`             |
+| Sidebar branding (7-H)                             | `"🪐 EXOTWIN"`                                                                 | `"EXOTWIN"`                                                                     |
+| `run_sim` button                                   | `"🚀 Run Simulation"`                                                          | `"Run Simulation"`                                                              |
+| `st.subheader("🧠 Reasoning Chain")`                | leading emoji                                                                 | `"Reasoning Chain"`                                                             |
+| SEPHI traffic-lights                               | `"\u2705"` / `"\u274c"` checkmarks                                            | **KEEP as-is** — ✅ / ❌ are preserved by design decision                         |
+| ISA / FP badges                                    | `"\u2705"` / `"\u274c"` / `"\u26a0\ufe0f"`                                    | **KEEP** ✅ / ❌; replace `"\u26a0\ufe0f"` (⚠️) with `"WARN"`                      |
+| `_ok = "\u2705"` / `_fail = "\u274c"` variables    | Unicode emoji                                                                 | **KEEP** — both ✅ and ❌ are intentionally retained                              |
+| `state_emoji` dict in classify_climate_state block | all emoji other than ✅/❌                                                      | Remove all entries except any that map to ✅/❌; omit other icons                 |
+| Famous-planet icons                                | `"\U0001f534"` etc.                                                           | Remove icon column entirely, keep planet name only                              |
+| `discover_most_habitable` button                   | no emoji — already clean                                                      | —                                                                               |
+| `st.warning("⚠️ Venus-like...")`                    | leading `⚠️`                                                                   | `st.warning("Venus-like H2SO4 clouds predicted")` — Streamlit adds its own icon |
+| `st.error("Carbon-rich...")`                       | no leading emoji here                                                         | already clean                                                                   |
+| Status pipeline writes                             | `"\U0001f6e1\ufe0f Validating..."` etc.                                       | `"Validating parameters..."` etc.                                               |
+| `st.subheader("📊 Habitable-Zone Candidates")`      | leading emoji                                                                 | `"Habitable-Zone Candidates — NASA Exoplanet Archive"`                          |
+| `st.markdown("##### ⭐ Famous Exoplanets")`         | `⭐`                                                                           | `"##### Famous Exoplanets"`                                                     |
+| `st.subheader("🔊 Planetary Soundscape")`           | `🔊`                                                                           | `"Planetary Soundscape"`                                                        |
+| Generate sound button                              | `"Generate sound"` — clean                                                    | —                                                                               |
+| Export download button                             | `"📥 Download..."`                                                             | `"Download interactive HTML globe"`                                             |
+| Diagnostics `st.button`                            | `"🧪 Run Self-Diagnostics"`                                                    | `"Run Self-Diagnostics"`                                                        |
+| Diagnostics `st.write` calls                       | all have leading emoji                                                        | strip emoji, keep text                                                          |
+| Compare with Earth button                          | `"🌍 Compare with Earth"`                                                      | `"Compare with Earth"`                                                          |
+| Fetch NASA catalog button                          | `"📥 Fetch full NASA catalog"`                                                 | `"Fetch full NASA catalog"`                                                     |
+| `architecture diagram` expander                    | heading text clean                                                            | —                                                                               |
+| Docker expander                                    | heading text clean                                                            | —                                                                               |
 
 
 **Search pattern to catch everything else:**
@@ -812,25 +812,25 @@ st.sidebar.markdown(
 
 ### Summary of files touched by Step 7
 
-| Sub-step | Location in `app.py` | Change type |
-|---|---|---|
-| 7-A | Global CSS block (~line 33) | Replace entire `<style>` block |
-| 7-B | Title/caption (~line 140) | Replace 2 lines |
-| 7-C-1 | `st.columns([1,2])` (~line 225) | Add `gap="large"` |
-| 7-C-2 | Slider block (~line 228) | Wrap in `st.container(border=True)` |
-| 7-C-3 | `run_sim` / `live_mode` (~line 242) | New 2-col layout |
-| 7-C-4 | Metric labels (~line 360) | Update 4 `st.metric` calls |
-| 7-C-5 | ESI gauge layout (~line 375) | Remove `height=200` |
-| 7-D | Radius Gap badge (~Step 6-D insert) | Wrap in container |
-| 7-E | Famous-planet grid (~line 555) | 3×2 grid instead of 1×6 |
-| 7-F | Chart heights (Tab 4) | `_CHART_H` constant + apply |
-| 7-G | Export section (~line 900) | Wrap in container |
-| 7-H | Sidebar (top + bottom) | Add branding + footer |
-| 7-I | Various column/subheader labels | Minor label/gap fixes |
-| 7-J | All sliders/buttons | Add `help=`, accessibility attrs |
-| 7-K | `should_compute` guard (~line 245) | Param-change debounce |
-| **7-L** | Entire `app.py` | Strip emoji except ✅/❌ |
-| **7-M** | System tab + sidebar footer | Add About Us section |
+| Sub-step | Location in `app.py`                | Change type                         |
+| -------- | ----------------------------------- | ----------------------------------- |
+| 7-A      | Global CSS block (~line 33)         | Replace entire `<style>` block      |
+| 7-B      | Title/caption (~line 140)           | Replace 2 lines                     |
+| 7-C-1    | `st.columns([1,2])` (~line 225)     | Add `gap="large"`                   |
+| 7-C-2    | Slider block (~line 228)            | Wrap in `st.container(border=True)` |
+| 7-C-3    | `run_sim` / `live_mode` (~line 242) | New 2-col layout                    |
+| 7-C-4    | Metric labels (~line 360)           | Update 4 `st.metric` calls          |
+| 7-C-5    | ESI gauge layout (~line 375)        | Remove `height=200`                 |
+| 7-D      | Radius Gap badge (~Step 6-D insert) | Wrap in container                   |
+| 7-E      | Famous-planet grid (~line 555)      | 3×2 grid instead of 1×6             |
+| 7-F      | Chart heights (Tab 4)               | `_CHART_H` constant + apply         |
+| 7-G      | Export section (~line 900)          | Wrap in container                   |
+| 7-H      | Sidebar (top + bottom)              | Add branding + footer               |
+| 7-I      | Various column/subheader labels     | Minor label/gap fixes               |
+| 7-J      | All sliders/buttons                 | Add `help=`, accessibility attrs    |
+| 7-K      | `should_compute` guard (~line 245)  | Param-change debounce               |
+| **7-L**  | Entire `app.py`                     | Strip emoji except ✅/❌              |
+| **7-M**  | System tab + sidebar footer         | Add About Us section                |
 
 ---
 
@@ -846,7 +846,171 @@ Step 4        (agent_setup.py — tools list)        Step 6-B/C  (app.py — pip
 Step 5        (agent_setup.py — system prompt)     Step 6-D/E  (app.py — display block + glossary)
                                                            ↓
                                                    Step 7-A–K  (app.py — UI polish, can be done after
-                                                               Steps 6-A–E since 7-D wraps the 6-D block)
+                                                               Steps 6-A–E since 7-D wraps the 6-D block)··• pip install -r requirements.txt 
+Defaulting to user installation because normal site-packages is not writeable
+Collecting streamlit==1.41.0 (from -r requirements.txt (line 1))
+  Using cached streamlit-1.41.0-py2.py3-none-any.whl.metadata (8.5 kB)
+Collecting pandas==2.2.3 (from -r requirements.txt (line 2))
+  Using cached pandas-2.2.3.tar.gz (4.4 MB)
+  Installing build dependencies ... done
+  Getting requirements to build wheel ... done
+  Installing backend dependencies ... done
+  Preparing metadata (pyproject.toml) ... error
+  error: subprocess-exited-with-error
+  
+  × Preparing metadata (pyproject.toml) did not run successfully.
+  │ exit code: 1
+  ╰─> [140 lines of output]
+      + meson setup /tmp/pip-install-qxwszpxa/pandas_911c4b0266f5494c963ea574a52cb4e0 /tmp/pip-install-qxwszpxa/pandas_911c4b0266f5494c963ea574a52cb4e0/.mesonpy-05ydv4z0/build -Dbuildtype=release -Db_ndebug=if-release -Db_vscrt=md --vsenv --native-file=/tmp/pip-install-qxwszpxa/pandas_911c4b0266f5494c963ea574a52cb4e0/.mesonpy-05ydv4z0/build/meson-python-native-file.ini
+      The Meson build system
+      Version: 1.2.1
+      Source dir: /tmp/pip-install-qxwszpxa/pandas_911c4b0266f5494c963ea574a52cb4e0
+      Build dir: /tmp/pip-install-qxwszpxa/pandas_911c4b0266f5494c963ea574a52cb4e0/.mesonpy-05ydv4z0/build
+      Build type: native build
+      Project name: pandas
+      Project version: 2.2.3
+      C compiler for the host machine: cc (gcc 15.2.1 "cc (GCC) 15.2.1 20260123 (Red Hat 15.2.1-7)")
+      C linker for the host machine: cc ld.bfd 2.45.1-4
+      C++ compiler for the host machine: c++ (gcc 15.2.1 "c++ (GCC) 15.2.1 20260123 (Red Hat 15.2.1-7)")
+      C++ linker for the host machine: c++ ld.bfd 2.45.1-4
+      Cython compiler for the host machine: cython (cython 3.0.12)
+      Host machine cpu family: x86_64
+      Host machine cpu: x86_64
+      Program python found: YES (/usr/bin/python3)
+      Found pkg-config: /usr/bin/pkg-config (2.3.0)
+      Run-time dependency python found: YES 3.14
+      Build targets in project: 53
+      
+      pandas 2.2.3
+      
+        User defined options
+          Native files: /tmp/pip-install-qxwszpxa/pandas_911c4b0266f5494c963ea574a52cb4e0/.mesonpy-05ydv4z0/build/meson-python-native-file.ini
+          buildtype   : release
+          vsenv       : True
+          b_ndebug    : if-release
+          b_vscrt     : md
+      
+      Found ninja-1.13.0.git.kitware.jobserver-pipe-1 at /tmp/pip-build-env-v491pk58/normal/bin/ninja
+      
+      Visual Studio environment is needed to run Ninja. It is recommended to use Meson wrapper:
+      /tmp/pip-build-env-v491pk58/overlay/bin/meson compile -C .
+      + /tmp/pip-build-env-v491pk58/normal/bin/ninja
+      [1/151] Generating pandas/_libs/algos_common_helper_pxi with a custom command
+      [2/151] Generating pandas/_libs/index_class_helper_pxi with a custom command
+      [3/151] Generating pandas/_libs/algos_take_helper_pxi with a custom command
+      [4/151] Generating pandas/_libs/intervaltree_helper_pxi with a custom command
+      [5/151] Generating pandas/_libs/khash_primitive_helper_pxi with a custom command
+      [6/151] Generating pandas/_libs/hashtable_class_helper_pxi with a custom command
+      [7/151] Generating pandas/_libs/sparse_op_helper_pxi with a custom command
+      [8/151] Generating pandas/_libs/hashtable_func_helper_pxi with a custom command
+      [9/151] Compiling Cython source /tmp/pip-install-qxwszpxa/pandas_911c4b0266f5494c963ea574a52cb4e0/pandas/_libs/tslibs/base.pyx
+      [10/151] Compiling Cython source /tmp/pip-install-qxwszpxa/pandas_911c4b0266f5494c963ea574a52cb4e0/pandas/_libs/tslibs/ccalendar.pyx
+      [11/151] Compiling Cython source /tmp/pip-install-qxwszpxa/pandas_911c4b0266f5494c963ea574a52cb4e0/pandas/_libs/tslibs/nattype.pyx
+      warning: /tmp/pip-install-qxwszpxa/pandas_911c4b0266f5494c963ea574a52cb4e0/pandas/_libs/tslibs/util.pxd:188:38: noexcept clause is ignored for function returning Python object
+      warning: /tmp/pip-install-qxwszpxa/pandas_911c4b0266f5494c963ea574a52cb4e0/pandas/_libs/tslibs/util.pxd:193:40: noexcept clause is ignored for function returning Python object
+      warning: /tmp/pip-install-qxwszpxa/pandas_911c4b0266f5494c963ea574a52cb4e0/pandas/_libs/tslibs/nattype.pyx:79:0: Global name __nat_unpickle matched from within class scope in contradiction to to Python 'class private name' rules. This may change in a future release.
+      warning: /tmp/pip-install-qxwszpxa/pandas_911c4b0266f5494c963ea574a52cb4e0/pandas/_libs/tslibs/nattype.pyx:79:0: Global name __nat_unpickle matched from within class scope in contradiction to to Python 'class private name' rules. This may change in a future release.
+      [12/151] Compiling Cython source /tmp/pip-install-qxwszpxa/pandas_911c4b0266f5494c963ea574a52cb4e0/pandas/_libs/tslibs/dtypes.pyx
+      [13/151] Compiling Cython source /tmp/pip-install-qxwszpxa/pandas_911c4b0266f5494c963ea574a52cb4e0/pandas/_libs/tslibs/np_datetime.pyx
+      warning: /tmp/pip-install-qxwszpxa/pandas_911c4b0266f5494c963ea574a52cb4e0/pandas/_libs/tslibs/util.pxd:188:38: noexcept clause is ignored for function returning Python object
+      warning: /tmp/pip-install-qxwszpxa/pandas_911c4b0266f5494c963ea574a52cb4e0/pandas/_libs/tslibs/util.pxd:193:40: noexcept clause is ignored for function returning Python object
+      [14/151] Compiling Cython source /tmp/pip-install-qxwszpxa/pandas_911c4b0266f5494c963ea574a52cb4e0/pandas/_libs/arrays.pyx
+      [15/151] Compiling Cython source /tmp/pip-install-qxwszpxa/pandas_911c4b0266f5494c963ea574a52cb4e0/pandas/_libs/tslibs/fields.pyx
+      [16/151] Compiling Cython source /tmp/pip-install-qxwszpxa/pandas_911c4b0266f5494c963ea574a52cb4e0/pandas/_libs/indexing.pyx
+      [17/151] Compiling Cython source /tmp/pip-install-qxwszpxa/pandas_911c4b0266f5494c963ea574a52cb4e0/pandas/_libs/tslibs/tzconversion.pyx
+      [18/151] Compiling Cython source /tmp/pip-install-qxwszpxa/pandas_911c4b0266f5494c963ea574a52cb4e0/pandas/_libs/tslibs/vectorized.pyx
+      [19/151] Compiling Cython source /tmp/pip-install-qxwszpxa/pandas_911c4b0266f5494c963ea574a52cb4e0/pandas/_libs/tslibs/conversion.pyx
+      warning: /tmp/pip-install-qxwszpxa/pandas_911c4b0266f5494c963ea574a52cb4e0/pandas/_libs/tslibs/util.pxd:188:38: noexcept clause is ignored for function returning Python object
+      warning: /tmp/pip-install-qxwszpxa/pandas_911c4b0266f5494c963ea574a52cb4e0/pandas/_libs/tslibs/util.pxd:193:40: noexcept clause is ignored for function returning Python object
+      [20/151] Compiling Cython source /tmp/pip-install-qxwszpxa/pandas_911c4b0266f5494c963ea574a52cb4e0/pandas/_libs/tslibs/period.pyx
+      warning: /tmp/pip-install-qxwszpxa/pandas_911c4b0266f5494c963ea574a52cb4e0/pandas/_libs/tslibs/util.pxd:188:38: noexcept clause is ignored for function returning Python object
+      warning: /tmp/pip-install-qxwszpxa/pandas_911c4b0266f5494c963ea574a52cb4e0/pandas/_libs/tslibs/util.pxd:193:40: noexcept clause is ignored for function returning Python object
+      [21/151] Compiling Cython source /tmp/pip-install-qxwszpxa/pandas_911c4b0266f5494c963ea574a52cb4e0/pandas/_libs/tslibs/offsets.pyx
+      warning: /tmp/pip-install-qxwszpxa/pandas_911c4b0266f5494c963ea574a52cb4e0/pandas/_libs/tslibs/util.pxd:188:38: noexcept clause is ignored for function returning Python object
+      warning: /tmp/pip-install-qxwszpxa/pandas_911c4b0266f5494c963ea574a52cb4e0/pandas/_libs/tslibs/util.pxd:193:40: noexcept clause is ignored for function returning Python object
+      [22/151] Compiling Cython source /tmp/pip-install-qxwszpxa/pandas_911c4b0266f5494c963ea574a52cb4e0/pandas/_libs/tslibs/timezones.pyx
+      warning: /tmp/pip-install-qxwszpxa/pandas_911c4b0266f5494c963ea574a52cb4e0/pandas/_libs/tslibs/util.pxd:188:38: noexcept clause is ignored for function returning Python object
+      warning: /tmp/pip-install-qxwszpxa/pandas_911c4b0266f5494c963ea574a52cb4e0/pandas/_libs/tslibs/util.pxd:193:40: noexcept clause is ignored for function returning Python object
+      [23/151] Compiling Cython source /tmp/pip-install-qxwszpxa/pandas_911c4b0266f5494c963ea574a52cb4e0/pandas/_libs/tslibs/timedeltas.pyx
+      warning: /tmp/pip-install-qxwszpxa/pandas_911c4b0266f5494c963ea574a52cb4e0/pandas/_libs/tslibs/util.pxd:188:38: noexcept clause is ignored for function returning Python object
+      warning: /tmp/pip-install-qxwszpxa/pandas_911c4b0266f5494c963ea574a52cb4e0/pandas/_libs/tslibs/util.pxd:193:40: noexcept clause is ignored for function returning Python object
+      [24/151] Compiling Cython source /tmp/pip-install-qxwszpxa/pandas_911c4b0266f5494c963ea574a52cb4e0/pandas/_libs/tslibs/parsing.pyx
+      warning: /tmp/pip-install-qxwszpxa/pandas_911c4b0266f5494c963ea574a52cb4e0/pandas/_libs/tslibs/util.pxd:188:38: noexcept clause is ignored for function returning Python object
+      warning: /tmp/pip-install-qxwszpxa/pandas_911c4b0266f5494c963ea574a52cb4e0/pandas/_libs/tslibs/util.pxd:193:40: noexcept clause is ignored for function returning Python object
+      [25/151] Compiling Cython source /tmp/pip-install-qxwszpxa/pandas_911c4b0266f5494c963ea574a52cb4e0/pandas/_libs/tslibs/strptime.pyx
+      warning: /tmp/pip-install-qxwszpxa/pandas_911c4b0266f5494c963ea574a52cb4e0/pandas/_libs/tslibs/util.pxd:188:38: noexcept clause is ignored for function returning Python object
+      warning: /tmp/pip-install-qxwszpxa/pandas_911c4b0266f5494c963ea574a52cb4e0/pandas/_libs/tslibs/util.pxd:193:40: noexcept clause is ignored for function returning Python object
+      [26/151] Compiling Cython source /tmp/pip-install-qxwszpxa/pandas_911c4b0266f5494c963ea574a52cb4e0/pandas/_libs/hashing.pyx
+      warning: /tmp/pip-install-qxwszpxa/pandas_911c4b0266f5494c963ea574a52cb4e0/pandas/_libs/tslibs/util.pxd:188:38: noexcept clause is ignored for function returning Python object
+      warning: /tmp/pip-install-qxwszpxa/pandas_911c4b0266f5494c963ea574a52cb4e0/pandas/_libs/tslibs/util.pxd:193:40: noexcept clause is ignored for function returning Python object
+      [27/151] Compiling Cython source /tmp/pip-install-qxwszpxa/pandas_911c4b0266f5494c963ea574a52cb4e0/pandas/_libs/tslibs/timestamps.pyx
+      warning: /tmp/pip-install-qxwszpxa/pandas_911c4b0266f5494c963ea574a52cb4e0/pandas/_libs/tslibs/util.pxd:188:38: noexcept clause is ignored for function returning Python object
+      warning: /tmp/pip-install-qxwszpxa/pandas_911c4b0266f5494c963ea574a52cb4e0/pandas/_libs/tslibs/util.pxd:193:40: noexcept clause is ignored for function returning Python object
+      [28/151] Compiling Cython source /tmp/pip-install-qxwszpxa/pandas_911c4b0266f5494c963ea574a52cb4e0/pandas/_libs/ops_dispatch.pyx
+      [29/151] Compiling Cython source /tmp/pip-install-qxwszpxa/pandas_911c4b0266f5494c963ea574a52cb4e0/pandas/_libs/properties.pyx
+      [30/151] Compiling Cython source /tmp/pip-install-qxwszpxa/pandas_911c4b0266f5494c963ea574a52cb4e0/pandas/_libs/byteswap.pyx
+      [31/151] Compiling Cython source /tmp/pip-install-qxwszpxa/pandas_911c4b0266f5494c963ea574a52cb4e0/pandas/_libs/missing.pyx
+      warning: /tmp/pip-install-qxwszpxa/pandas_911c4b0266f5494c963ea574a52cb4e0/pandas/_libs/tslibs/util.pxd:188:38: noexcept clause is ignored for function returning Python object
+      warning: /tmp/pip-install-qxwszpxa/pandas_911c4b0266f5494c963ea574a52cb4e0/pandas/_libs/tslibs/util.pxd:193:40: noexcept clause is ignored for function returning Python object
+      [32/151] Compiling Cython source /tmp/pip-install-qxwszpxa/pandas_911c4b0266f5494c963ea574a52cb4e0/pandas/_libs/internals.pyx
+      warning: /tmp/pip-install-qxwszpxa/pandas_911c4b0266f5494c963ea574a52cb4e0/pandas/_libs/tslibs/util.pxd:188:38: noexcept clause is ignored for function returning Python object
+      warning: /tmp/pip-install-qxwszpxa/pandas_911c4b0266f5494c963ea574a52cb4e0/pandas/_libs/tslibs/util.pxd:193:40: noexcept clause is ignored for function returning Python object
+      [33/151] Compiling C object pandas/_libs/tslibs/base.cpython-314-x86_64-linux-gnu.so.p/meson-generated_pandas__libs_tslibs_base.pyx.c.o
+      FAILED: [code=1] pandas/_libs/tslibs/base.cpython-314-x86_64-linux-gnu.so.p/meson-generated_pandas__libs_tslibs_base.pyx.c.o
+      cc -Ipandas/_libs/tslibs/base.cpython-314-x86_64-linux-gnu.so.p -Ipandas/_libs/tslibs -I../../pandas/_libs/tslibs -I../../../../pip-build-env-v491pk58/overlay/lib64/python3.14/site-packages/numpy/_core/include -I../../pandas/_libs/include -I/usr/include/python3.14 -fvisibility=hidden -fdiagnostics-color=always -DNDEBUG -D_FILE_OFFSET_BITS=64 -w -std=c11 -O3 -DNPY_NO_DEPRECATED_API=0 -DNPY_TARGET_VERSION=NPY_1_21_API_VERSION -fPIC -MD -MQ pandas/_libs/tslibs/base.cpython-314-x86_64-linux-gnu.so.p/meson-generated_pandas__libs_tslibs_base.pyx.c.o -MF pandas/_libs/tslibs/base.cpython-314-x86_64-linux-gnu.so.p/meson-generated_pandas__libs_tslibs_base.pyx.c.o.d -o pandas/_libs/tslibs/base.cpython-314-x86_64-linux-gnu.so.p/meson-generated_pandas__libs_tslibs_base.pyx.c.o -c pandas/_libs/tslibs/base.cpython-314-x86_64-linux-gnu.so.p/pandas/_libs/tslibs/base.pyx.c
+      pandas/_libs/tslibs/base.cpython-314-x86_64-linux-gnu.so.p/pandas/_libs/tslibs/base.pyx.c:16:10: fatal error: Python.h: No such file or directory
+         16 | #include "Python.h"
+            |          ^~~~~~~~~~
+      compilation terminated.
+      [34/151] Compiling Cython source /tmp/pip-install-qxwszpxa/pandas_911c4b0266f5494c963ea574a52cb4e0/pandas/_libs/testing.pyx
+      warning: /tmp/pip-install-qxwszpxa/pandas_911c4b0266f5494c963ea574a52cb4e0/pandas/_libs/tslibs/util.pxd:188:38: noexcept clause is ignored for function returning Python object
+      warning: /tmp/pip-install-qxwszpxa/pandas_911c4b0266f5494c963ea574a52cb4e0/pandas/_libs/tslibs/util.pxd:193:40: noexcept clause is ignored for function returning Python object
+      [35/151] Compiling Cython source /tmp/pip-install-qxwszpxa/pandas_911c4b0266f5494c963ea574a52cb4e0/pandas/_libs/sas.pyx
+      [36/151] Compiling Cython source /tmp/pip-install-qxwszpxa/pandas_911c4b0266f5494c963ea574a52cb4e0/pandas/_libs/ops.pyx
+      warning: /tmp/pip-install-qxwszpxa/pandas_911c4b0266f5494c963ea574a52cb4e0/pandas/_libs/tslibs/util.pxd:188:38: noexcept clause is ignored for function returning Python object
+      warning: /tmp/pip-install-qxwszpxa/pandas_911c4b0266f5494c963ea574a52cb4e0/pandas/_libs/tslibs/util.pxd:193:40: noexcept clause is ignored for function returning Python object
+      [37/151] Compiling Cython source /tmp/pip-install-qxwszpxa/pandas_911c4b0266f5494c963ea574a52cb4e0/pandas/_libs/reshape.pyx
+      [38/151] Compiling Cython source /tmp/pip-install-qxwszpxa/pandas_911c4b0266f5494c963ea574a52cb4e0/pandas/_libs/index.pyx
+      warning: /tmp/pip-install-qxwszpxa/pandas_911c4b0266f5494c963ea574a52cb4e0/pandas/_libs/tslibs/util.pxd:188:38: noexcept clause is ignored for function returning Python object
+      warning: /tmp/pip-install-qxwszpxa/pandas_911c4b0266f5494c963ea574a52cb4e0/pandas/_libs/tslibs/util.pxd:193:40: noexcept clause is ignored for function returning Python object
+      [39/151] Compiling Cython source /tmp/pip-install-qxwszpxa/pandas_911c4b0266f5494c963ea574a52cb4e0/pandas/_libs/parsers.pyx
+      warning: /tmp/pip-install-qxwszpxa/pandas_911c4b0266f5494c963ea574a52cb4e0/pandas/_libs/tslibs/util.pxd:188:38: noexcept clause is ignored for function returning Python object
+      warning: /tmp/pip-install-qxwszpxa/pandas_911c4b0266f5494c963ea574a52cb4e0/pandas/_libs/tslibs/util.pxd:193:40: noexcept clause is ignored for function returning Python object
+      warning: /tmp/pip-install-qxwszpxa/pandas_911c4b0266f5494c963ea574a52cb4e0/pandas/_libs/parsers.pyx:1605:18: noexcept clause is ignored for function returning Python object
+      [40/151] Compiling Cython source /tmp/pip-install-qxwszpxa/pandas_911c4b0266f5494c963ea574a52cb4e0/pandas/_libs/window/indexers.pyx
+      [41/151] Compiling Cython source /tmp/pip-install-qxwszpxa/pandas_911c4b0266f5494c963ea574a52cb4e0/pandas/_libs/writers.pyx
+      [42/151] Compiling Cython source /tmp/pip-install-qxwszpxa/pandas_911c4b0266f5494c963ea574a52cb4e0/pandas/_libs/tslib.pyx
+      warning: /tmp/pip-install-qxwszpxa/pandas_911c4b0266f5494c963ea574a52cb4e0/pandas/_libs/tslibs/util.pxd:188:38: noexcept clause is ignored for function returning Python object
+      warning: /tmp/pip-install-qxwszpxa/pandas_911c4b0266f5494c963ea574a52cb4e0/pandas/_libs/tslibs/util.pxd:193:40: noexcept clause is ignored for function returning Python object
+      [43/151] Compiling Cython source /tmp/pip-install-qxwszpxa/pandas_911c4b0266f5494c963ea574a52cb4e0/pandas/_libs/lib.pyx
+      warning: /tmp/pip-install-qxwszpxa/pandas_911c4b0266f5494c963ea574a52cb4e0/pandas/_libs/tslibs/util.pxd:188:38: noexcept clause is ignored for function returning Python object
+      warning: /tmp/pip-install-qxwszpxa/pandas_911c4b0266f5494c963ea574a52cb4e0/pandas/_libs/tslibs/util.pxd:193:40: noexcept clause is ignored for function returning Python object
+      [44/151] Compiling Cython source /tmp/pip-install-qxwszpxa/pandas_911c4b0266f5494c963ea574a52cb4e0/pandas/_libs/window/aggregations.pyx
+      [45/151] Compiling Cython source /tmp/pip-install-qxwszpxa/pandas_911c4b0266f5494c963ea574a52cb4e0/pandas/_libs/interval.pyx
+      warning: /tmp/pip-install-qxwszpxa/pandas_911c4b0266f5494c963ea574a52cb4e0/pandas/_libs/tslibs/util.pxd:188:38: noexcept clause is ignored for function returning Python object
+      warning: /tmp/pip-install-qxwszpxa/pandas_911c4b0266f5494c963ea574a52cb4e0/pandas/_libs/tslibs/util.pxd:193:40: noexcept clause is ignored for function returning Python object
+      [46/151] Compiling Cython source /tmp/pip-install-qxwszpxa/pandas_911c4b0266f5494c963ea574a52cb4e0/pandas/_libs/sparse.pyx
+      [47/151] Compiling Cython source /tmp/pip-install-qxwszpxa/pandas_911c4b0266f5494c963ea574a52cb4e0/pandas/_libs/join.pyx
+      [48/151] Compiling Cython source /tmp/pip-install-qxwszpxa/pandas_911c4b0266f5494c963ea574a52cb4e0/pandas/_libs/algos.pyx
+      warning: /tmp/pip-install-qxwszpxa/pandas_911c4b0266f5494c963ea574a52cb4e0/pandas/_libs/tslibs/util.pxd:188:38: noexcept clause is ignored for function returning Python object
+      warning: /tmp/pip-install-qxwszpxa/pandas_911c4b0266f5494c963ea574a52cb4e0/pandas/_libs/tslibs/util.pxd:193:40: noexcept clause is ignored for function returning Python object
+      [49/151] Compiling Cython source /tmp/pip-install-qxwszpxa/pandas_911c4b0266f5494c963ea574a52cb4e0/pandas/_libs/groupby.pyx
+      warning: /tmp/pip-install-qxwszpxa/pandas_911c4b0266f5494c963ea574a52cb4e0/pandas/_libs/tslibs/util.pxd:188:38: noexcept clause is ignored for function returning Python object
+      warning: /tmp/pip-install-qxwszpxa/pandas_911c4b0266f5494c963ea574a52cb4e0/pandas/_libs/tslibs/util.pxd:193:40: noexcept clause is ignored for function returning Python object
+      [50/151] Compiling Cython source /tmp/pip-install-qxwszpxa/pandas_911c4b0266f5494c963ea574a52cb4e0/pandas/_libs/hashtable.pyx
+      warning: /tmp/pip-install-qxwszpxa/pandas_911c4b0266f5494c963ea574a52cb4e0/pandas/_libs/tslibs/util.pxd:188:38: noexcept clause is ignored for function returning Python object
+      warning: /tmp/pip-install-qxwszpxa/pandas_911c4b0266f5494c963ea574a52cb4e0/pandas/_libs/tslibs/util.pxd:193:40: noexcept clause is ignored for function returning Python object
+      ninja: build stopped: subcommand failed.
+      [end of output]
+  
+  note: This error originates from a subprocess, and is likely not a problem with pip.
+error: metadata-generation-failed
+
+× Encountered error while generating package metadata.
+╰─> See above for output.
+
+note: This is an issue with the package mentioned above, not pip.
+hint: See above for details.
 ```
 
 Steps 1–5 (agent wiring) and Steps 6-A–E (UI wiring) are independent of each other but both depend on Step 0.  

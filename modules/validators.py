@@ -20,13 +20,13 @@ class StellarParameters(BaseModel):
         ge=2300, le=10000, description="Effective temperature [K]"
     )
     radius: float = Field(
-        ge=0.08, le=100.0, description="Stellar radius [R_sun]"
+        ge=0.08, le=100.0, description="Stellar radius [R☉]"
     )
     mass: float = Field(
-        ge=0.08, le=150.0, description="Stellar mass [M_sun]"
+        ge=0.08, le=150.0, description="Stellar mass [M☉]"
     )
     luminosity: Optional[float] = Field(
-        default=None, ge=-5.0, le=7.0, description="log(L/L_sun)"
+        default=None, ge=-5.0, le=7.0, description="log(L/L☉)"
     )
 
     @field_validator("teff")
@@ -44,10 +44,10 @@ class PlanetaryParameters(BaseModel):
 
     name: str = Field(min_length=1, max_length=100)
     radius_earth: float = Field(
-        ge=0.3, le=25.0, description="Planet radius [R_Earth]"
+        ge=0.3, le=25.0, description="Planet radius [R⊕]"
     )
     mass_earth: Optional[float] = Field(
-        default=None, ge=0.01, le=5000.0, description="Planet mass [M_Earth]"
+        default=None, ge=0.01, le=5000.0, description="Planet mass [M⊕]"
     )
     semi_major_axis: float = Field(
         ge=0.001, le=1000.0, description="Semi-major axis [AU]"
@@ -79,8 +79,8 @@ class PlanetaryParameters(BaseModel):
                     if ratio < 0.2 or ratio > 5.0:
                         raise ValueError(
                             f"Mass-radius relation violated "
-                            f"(M={self.mass_earth}, R={self.radius_earth}, "
-                            f"expected R~{expected_r:.2f})"
+                            f"(M={self.mass_earth} M\u2295, R={self.radius_earth} R\u2295, "
+                            f"expected R\u2295~{expected_r:.2f})"
                         )
         return self
 

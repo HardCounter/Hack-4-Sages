@@ -41,9 +41,8 @@ def generate_eyeball_map(
     """Analytical surface-temperature map.
 
     For a tidally locked planet the map has an *eyeball* topology:
-    a warm substellar region centred at (lat=0, lon=π) surrounded by ice.
-    The centre column (lon=π) is the substellar point; create_3d_globe
-    rolls the map so that column aligns with the star in the +X direction.
+    a warm substellar region centred at (0, 0) surrounded by ice.
+    LON=0 maps to the +X axis in the 3-D globe, i.e. towards the star.
     For a fast rotator a simple latitudinal gradient is used.
     """
     lat = np.linspace(-np.pi / 2, np.pi / 2, n_lat)
@@ -51,7 +50,7 @@ def generate_eyeball_map(
     LAT, LON = np.meshgrid(lat, lon, indexing="ij")
 
     if tidally_locked:
-        cos_zenith = np.cos(LAT) * np.cos(LON - np.pi)
+        cos_zenith = np.cos(LAT) * np.cos(LON)
         cos_zenith = np.clip(cos_zenith, 0, 1)
         T_sub = T_eq * 1.4
         T_night = max(T_eq * 0.3, 40)
@@ -82,17 +81,15 @@ def create_3d_globe(
     Y = r * np.cos(PHI) * np.sin(THETA)
     Z = r * np.sin(PHI)
 
-    # The substellar (hottest) point is at the centre column (lon=π).
-    # Roll by n_lon//2 so it lands at column 0 (theta=0, X=+1) which
-    # faces the host-star marker placed at x=+3.
-    tmap = np.roll(temperature_map, n_lon // 2, axis=1)
-
     cs = colorscale or SCIENCE_COLORSCALE
     T_min, T_max = float(temperature_map.min()), float(temperature_map.max())
 
+    # Roll by 180° so the substellar (warm) face aligns with the star marker at -X
+    tmap_display = np.roll(temperature_map, temperature_map.shape[1] // 2, axis=1)
+
     surface = go.Surface(
         x=X, y=Y, z=Z,
-        surfacecolor=tmap,
+        surfacecolor=tmap_display,
         colorscale=cs,
         cmin=T_min, cmax=T_max,
         colorbar=dict(
@@ -114,7 +111,7 @@ def create_3d_globe(
             ambient=0.4, diffuse=0.6, specular=0.15,
             roughness=0.8, fresnel=0.1,
         ),
-        lightposition=dict(x=1000, y=0, z=0),
+        lightposition=dict(x=-1000, y=0, z=0),
     )
 
     fig = go.Figure(data=[surface])
@@ -124,7 +121,7 @@ def create_3d_globe(
         star_color = _star_color(star_teff) if star_teff else "#ffe066"
         fig.add_trace(
             go.Scatter3d(
-                x=[3.0], y=[0.0], z=[0.0],
+                x=[-3.0], y=[0.0], z=[0.0],
                 mode="markers",
                 marker=dict(size=8, color=star_color, symbol="diamond"),
                 name="Host star",

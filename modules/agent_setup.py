@@ -90,6 +90,57 @@ def compute_habitability(
 
 
 @tool
+def classify_planet_radius_gap(radius_earth: float) -> str:
+    """Classify a planet's radius relative to the Fulton Gap (radius valley).
+
+    Use this when the user asks about planet type, atmosphere retention,
+    sub-Neptune vs super-Earth distinction, or the Fulton Gap.
+
+    Args:
+        radius_earth: Planet radius in Earth radii.
+    """
+    from modules.astro_physics import classify_radius_gap
+    result = classify_radius_gap(radius_earth)
+    return json.dumps(result, indent=2)
+
+
+@tool
+def predict_sulfur_chemistry(
+    t_eq: float,
+    surface_pressure_bar: float,
+    atmosphere_type: str = "h2_rich",
+) -> str:
+    """Predict sulfur chemistry species and surface minerals for a planet.
+
+    Use this when the user asks about atmospheric composition, sulfur clouds,
+    Venus-like conditions, surface mineralogy, or H2S / H2SO4 formation.
+
+    Args:
+        t_eq: Equilibrium temperature in Kelvin.
+        surface_pressure_bar: Surface atmospheric pressure in bar.
+        atmosphere_type: One of 'h2_rich', 'o2_rich', 'ch4_co2'.
+    """
+    from modules.astro_physics import assess_sulfur_chemistry
+    result = assess_sulfur_chemistry(t_eq, surface_pressure_bar, atmosphere_type)
+    return json.dumps(result, indent=2)
+
+
+@tool
+def assess_carbon_oxygen_ratio(co_ratio: float) -> str:
+    """Assess planetary composition based on the Carbon-to-Oxygen ratio.
+
+    Use this when the user asks about C/O ratio, water worlds, carbon planets,
+    ocean likelihood, or how the C/O ratio changes ESI/habitability.
+
+    Args:
+        co_ratio: Carbon-to-Oxygen ratio (solar ≈ 0.55, Earth ≈ 0.50).
+    """
+    from modules.astro_physics import assess_co_ratio
+    result = assess_co_ratio(co_ratio)
+    return json.dumps(result, indent=2)
+
+
+@tool
 def run_climate_simulation(
     radius_earth: float,
     mass_earth: float,
@@ -105,8 +156,8 @@ def run_climate_simulation(
     Use this to generate the 2-D temperature distribution on a planet.
 
     Args:
-        radius_earth: Planet radius [R_Earth].
-        mass_earth: Planet mass [M_Earth].
+        radius_earth: Planet radius [R⊕].
+        mass_earth: Planet mass [M⊕].
         semi_major_axis_au: Semi-major axis [AU].
         star_teff_K: Star effective temperature [K].
         star_radius_solar: Star radius [R_sun].
@@ -337,6 +388,9 @@ tools = [
     query_nasa_archive,
     compute_habitability,
     run_climate_simulation,
+    classify_planet_radius_gap,       # NEW
+    predict_sulfur_chemistry,          # NEW
+    assess_carbon_oxygen_ratio,        # NEW
     consult_domain_expert,
     discover_most_habitable,
     compare_two_planets,
@@ -358,6 +412,9 @@ CAPABILITIES
 6. Compare two planets side-by-side (compare_two_planets)
 7. Detect anomalous planets in the catalog (detect_anomalous_planets)
 8. Cite scientific literature to support claims (cite_scientific_literature)
+9. Classify a planet's radius relative to the Fulton Gap (classify_planet_radius_gap)
+10. Predict sulfur chemistry and surface mineralogy (predict_sulfur_chemistry)
+11. Assess planetary composition from the C/O ratio (assess_carbon_oxygen_ratio)
 
 PROCEDURE
 1. When the user asks about a planet → first fetch data from NASA.
@@ -378,6 +435,16 @@ RULES
 - When comparing planets, prefer the compare_two_planets tool.
 - For "find habitable" queries, use discover_most_habitable.
 - Cite scientific literature to support key claims when relevant.
+
+NEW TOOL USAGE GUIDANCE
+- Use classify_planet_radius_gap whenever a planet's radius suggests it may sit
+  in the Fulton Gap (1.5–2.0 Earth radii), or when the user asks about
+  sub-Neptune vs super-Earth distinction, or atmosphere retention.
+- Use predict_sulfur_chemistry when discussing surface conditions, clouds,
+  or mineralogy, or when the user asks about H2S, H2SO4, or Venus-like environments.
+- Use assess_carbon_oxygen_ratio when the user provides or asks about a C/O ratio,
+  or when discussing whether a planet could host liquid water vs. being a dry
+  carbon world. The returned esi_modifier field explains any ESI adjustment.
 """
 
 prompt = ChatPromptTemplate.from_messages(
