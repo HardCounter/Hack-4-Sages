@@ -188,6 +188,7 @@ celerybeat.pid
 
 ./models
 *.pkl
+data/chroma_db/
 # Environments
 .env
 .venv

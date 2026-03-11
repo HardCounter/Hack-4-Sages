@@ -308,25 +308,47 @@ def detect_anomalous_planets(top_n: int = 5) -> str:
 
 
 @tool
-def cite_scientific_literature(query: str) -> str:
-    """Search the indexed scientific literature for relevant papers.
+def cite_scientific_literature(query: str, topics: str = "") -> str:
+    """Search the indexed scientific literature (~40 peer-reviewed papers) for
+    relevant citations using hybrid semantic + keyword search.
 
-    Use this to back up claims with real citations. Returns the most
-    relevant paper abstracts and formatted references.
+    Use this to back up claims with real citations. Returns the most relevant
+    paper abstracts, key quantitative findings, and formatted references.
+
+    The corpus covers: habitable zones, ESI/SEPHI, tidal locking, climate
+    modeling (GCM, clouds, OHT), biosignatures & false positives, atmospheric
+    escape, planetary interiors, stellar context, JWST observations, and
+    astrobiology.
 
     Args:
         query: A scientific topic or question to find citations for.
+            Be specific, e.g. "habitable zone boundaries M-dwarf stars"
+            rather than just "habitable zone".
+        topics: Optional comma-separated topic filter tags. Available tags
+            include: habitable_zone, m_dwarf, tidal_locking, biosignatures,
+            false_positives, atmospheric_escape, climate_modeling, gcm,
+            cloud_feedback, ocean_heat_transport, planetary_interior,
+            plate_tectonics, mass_radius, stellar_activity, uv_environment,
+            jwst, transit_spectroscopy, astrobiology, photosynthesis.
+            Leave empty to search all papers.
     """
     from modules.rag_citations import cite_literature, format_citations_markdown
-    citations = cite_literature(query, n_results=3)
+
+    topic_list = [t.strip() for t in topics.split(",") if t.strip()] or None
+    citations = cite_literature(query, n_results=5, topics=topic_list)
     if not citations:
         return "No relevant citations found."
     details = []
     for c in citations:
-        details.append(
+        block = (
             f"**{c['authors']} ({c['year']})** — {c['title']}\n"
-            f"_{c['journal']}_\n{c['abstract'][:300]}"
+            f"_{c['journal']}_\n{c['abstract'][:500]}"
         )
+        if c.get("key_findings"):
+            findings = c["key_findings"]
+            if isinstance(findings, list):
+                block += "\nKey findings: " + "; ".join(findings[:3])
+        details.append(block)
     formatted = format_citations_markdown(citations)
     return "\n\n".join(details) + "\n\n" + formatted
 
@@ -357,7 +379,7 @@ CAPABILITIES
 5. Discover the most habitable planets in the archive (discover_most_habitable)
 6. Compare two planets side-by-side (compare_two_planets)
 7. Detect anomalous planets in the catalog (detect_anomalous_planets)
-8. Cite scientific literature to support claims (cite_scientific_literature)
+8. Cite scientific literature from a corpus of ~40 peer-reviewed papers (cite_scientific_literature)
 
 PROCEDURE
 1. When the user asks about a planet → first fetch data from NASA.
@@ -369,6 +391,21 @@ PROCEDURE
    consult the domain expert again to interpret the temperature map.
 5. Synthesise the domain expert's opinion with the numbers into a clear answer.
 
+CITATION POLICY
+- ALWAYS call cite_scientific_literature after presenting habitability analysis
+  or any substantive scientific claim. Use specific queries, e.g.:
+  "habitable zone boundaries for M-dwarf stars" rather than "habitable zone".
+- Use the topics parameter for targeted retrieval. Available topic tags:
+  habitable_zone, m_dwarf, tidal_locking, biosignatures, false_positives,
+  atmospheric_escape, climate_modeling, gcm, cloud_feedback,
+  ocean_heat_transport, planetary_interior, plate_tectonics, mass_radius,
+  stellar_activity, uv_environment, jwst, transit_spectroscopy, astrobiology.
+- Include at least 2-3 citations per substantive claim in your final answer.
+- Reference key findings from the retrieved papers to ground your statements.
+- When discussing M-dwarf planets, cite relevant papers on tidal locking,
+  atmospheric escape, and stellar activity.
+- When discussing biosignatures, always cite false-positive literature.
+
 RULES
 - Always cite the data source (NASA Exoplanet Archive).
 - Never invent parameter values — always use tool outputs.
@@ -377,7 +414,6 @@ RULES
 - Flag uncertainties and model limitations.
 - When comparing planets, prefer the compare_two_planets tool.
 - For "find habitable" queries, use discover_most_habitable.
-- Cite scientific literature to support key claims when relevant.
 """
 
 prompt = ChatPromptTemplate.from_messages(
