@@ -787,31 +787,170 @@ with tab_catalog:
                 st.dataframe(cand, use_container_width=True)
                 st.success(f"Found {len(cand)} candidates")
 
-                # Anomaly detection + UMAP
+                # ── Anomaly detection + UMAP + Weird Planets ──
                 try:
                     from modules.anomaly_detection import (
+                        build_weird_planets_table,
                         compute_umap_embedding,
                         create_umap_figure,
                         detect_anomalies,
                     )
-                    with st.spinner("Running anomaly detection..."):
-                        detected = detect_anomalies(cand)
-                        n_anom = detected["is_anomaly"].sum()
-                        st.markdown(f"**Anomaly detection:** found {n_anom} unusual planets out of {len(detected)}")
-                        anom_top = detected[detected["is_anomaly"]].head(10)
-                        if not anom_top.empty:
-                            display_cols = [c for c in ["pl_name", "pl_radj", "st_teff", "pl_orbsmax", "anomaly_score"] if c in anom_top.columns]
-                            st.dataframe(anom_top[display_cols], use_container_width=True)
 
-                    with st.spinner("Computing UMAP embedding..."):
-                        emb = compute_umap_embedding(detected)
-                        if emb is not None:
-                            fig_umap = create_umap_figure(detected, emb)
-                            st.plotly_chart(fig_umap, use_container_width=True)
-                except Exception:
-                    pass
+                    with st.spinner("Running anomaly detection\u2026"):
+                        detected = detect_anomalies(cand)
+                        n_anom = int(detected["is_anomaly"].sum())
+
+                    st.markdown("---")
+                    st.markdown("### \U0001f50d Anomaly Detection")
+                    col_stat1, col_stat2, col_stat3 = st.columns(3)
+                    col_stat1.metric("Planets analysed", len(detected))
+                    col_stat2.metric("Anomalies found", n_anom)
+                    col_stat3.metric(
+                        "Contamination rate",
+                        f"{n_anom / len(detected):.1%}" if len(detected) else "—",
+                    )
+
+                    umap_col, weird_col = st.columns([3, 2])
+
+                    with umap_col:
+                        with st.spinner("Computing UMAP embedding\u2026"):
+                            emb = compute_umap_embedding(detected)
+                            if emb is not None:
+                                fig_umap = create_umap_figure(detected, emb)
+                                st.plotly_chart(fig_umap, use_container_width=True)
+                            else:
+                                st.info("UMAP embedding unavailable (install `umap-learn`).")
+
+                    with weird_col:
+                        st.markdown("#### \U0001f47d Weirdest Planets")
+                        weird = build_weird_planets_table(cand, n=12)
+                        if not weird.empty:
+                            st.dataframe(
+                                weird,
+                                use_container_width=True,
+                                height=400,
+                            )
+                        else:
+                            st.info("Not enough data for weird-planet ranking.")
+
+                except Exception as exc_anom:
+                    st.warning(f"Anomaly detection skipped: {exc_anom}")
             except Exception as exc:
                 st.error(f"NASA error: {exc}")
+
+    # ── Real vs Synthetic habitable-planet comparison ─────────
+    st.markdown("---")
+    st.markdown("### \U0001f9ec Real vs Synthetic Habitable Planets")
+    st.caption(
+        "Compare the real habitable-zone candidates with CTGAN-generated "
+        "synthetic counterparts. Synthetic data is clearly marked as "
+        "**exploratory** — use it to understand distributional coverage, "
+        "not as ground truth."
+    )
+
+    if st.button("\U0001f52c Run comparison"):
+        with st.spinner("Loading catalog and CTGAN model\u2026"):
+            try:
+                from modules.combined_catalog import build_combined_catalog
+                from modules.data_augmentation import ExoplanetDataAugmenter
+
+                cat = build_combined_catalog()
+                aug = ExoplanetDataAugmenter()
+                data = aug.prepare_normalised_data(cat)
+                real_hab = data[data["habitable"] == 1].copy()
+
+                import os as _os
+                _ctgan_path = _os.path.join("models", "ctgan_exoplanets.pkl")
+                if _os.path.exists(_ctgan_path):
+                    aug.load_model(_ctgan_path)
+                else:
+                    st.warning("CTGAN model not found — training a quick model (50 epochs)\u2026")
+                    aug.epochs = 50
+                    aug.train(data)
+
+                synth = aug.generate_synthetic_planets(
+                    n_samples=2000, condition_column="habitable", condition_value=1,
+                )
+                synth = ExoplanetDataAugmenter.validate_synthetic_data(synth)
+
+                st.success(
+                    f"Real habitable: **{len(real_hab)}** planets  \u00b7  "
+                    f"Synthetic habitable (after validation): **{len(synth)}**"
+                )
+
+                compare_cols = [
+                    "radius_earth", "mass_earth", "semi_major_axis_au",
+                    "insol_earth", "t_eq_K", "star_teff_K",
+                ]
+                nice = {
+                    "radius_earth": "Radius (R\u2295)", "mass_earth": "Mass (M\u2295)",
+                    "semi_major_axis_au": "Semi-major axis (AU)",
+                    "insol_earth": "Insolation (S\u2295)", "t_eq_K": "T_eq (K)",
+                    "star_teff_K": "Star T_eff (K)",
+                }
+
+                from plotly.subplots import make_subplots
+                ncols_fig = 3
+                nrows_fig = (len(compare_cols) + ncols_fig - 1) // ncols_fig
+                fig_cmp = make_subplots(
+                    rows=nrows_fig, cols=ncols_fig,
+                    subplot_titles=[nice.get(c, c) for c in compare_cols],
+                )
+                for i, col in enumerate(compare_cols):
+                    r, c = divmod(i, ncols_fig)
+                    fig_cmp.add_trace(
+                        go.Histogram(
+                            x=real_hab[col].dropna(), name="Real",
+                            marker_color="#2171b5", opacity=0.65,
+                            showlegend=(i == 0),
+                        ),
+                        row=r + 1, col=c + 1,
+                    )
+                    fig_cmp.add_trace(
+                        go.Histogram(
+                            x=synth[col].dropna(), name="Synthetic (exploratory)",
+                            marker_color="#d73027", opacity=0.55,
+                            showlegend=(i == 0),
+                        ),
+                        row=r + 1, col=c + 1,
+                    )
+                fig_cmp.update_layout(
+                    barmode="overlay", height=300 * nrows_fig,
+                    title_text="Distribution Overlay — Real vs Synthetic Habitable",
+                    paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)",
+                    font=dict(color="white"),
+                    legend=dict(
+                        bgcolor="rgba(20,20,50,0.7)", bordercolor="#555",
+                        borderwidth=1, font=dict(color="white"),
+                    ),
+                )
+                st.plotly_chart(fig_cmp, use_container_width=True)
+
+                # Summary statistics table
+                rows_stats = []
+                for col in compare_cols:
+                    rv = real_hab[col].dropna()
+                    sv = synth[col].dropna()
+                    rows_stats.append({
+                        "Parameter": nice.get(col, col),
+                        "Real mean": f"{rv.mean():.3g}",
+                        "Real std": f"{rv.std():.3g}",
+                        "Synth mean": f"{sv.mean():.3g}",
+                        "Synth std": f"{sv.std():.3g}",
+                        "Real n": len(rv),
+                        "Synth n": len(sv),
+                    })
+                st.dataframe(pd.DataFrame(rows_stats), use_container_width=True)
+
+                st.info(
+                    "\u26a0\ufe0f **Synthetic data caveat:** These samples are generated "
+                    "by a CTGAN trained on ~60 real habitable-zone planets. They "
+                    "capture broad distributional shape but should not be treated "
+                    "as real discoveries. All synthetic rows are post-filtered "
+                    "to the 1\u201399th percentile envelope of real parameters."
+                )
+            except Exception as exc_cmp:
+                st.error(f"Comparison failed: {exc_cmp}")
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
