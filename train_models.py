@@ -200,11 +200,14 @@ def train_pinn(epochs: int = 5000, n_colloc: int = 8192, mode: str = "basic"):
     print(f"  Epochs: {epochs}")
 
     t0 = time.time()
-    model = train_pinnformer(
-        cfg=cfg, n_colloc=n_colloc, epochs=epochs, device=device, log_every=500
+    model, history = train_pinnformer(
+        n_colloc=n_colloc, epochs=epochs, device=device, log_every=500
     )
     elapsed = time.time() - t0
     print(f"  Training completed in {elapsed/60:.1f} min")
+    if history.validation:
+        v = history.validation
+        print(f"  Validation residual RMSE: {v['pde_residual_rmse']:.4e}")
 
     path = os.path.join(MODELS_DIR, "pinn3d_weights.pt")
     save_pinnformer(model, path, cfg=cfg)

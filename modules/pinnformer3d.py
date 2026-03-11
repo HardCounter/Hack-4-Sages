@@ -40,7 +40,7 @@ References
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Dict, Optional
+from typing import Dict, List, Optional, Tuple
 
 import numpy as np
 
@@ -227,6 +227,14 @@ if _HAS_TORCH:
             lap = lap + g2[:, i]
         return lap
 
+    from torch.nn.attention import SDPBackend, sdpa_kernel
+
+    # The math backend is the only SDP implementation that supports the
+    # higher-order autograd (second derivatives) needed for the Laplacian.
+    # Flash / efficient attention kernels on modern GPUs (RTX 50-series,
+    # etc.) will raise "derivative not implemented" otherwise.
+    _MATH_ONLY = [SDPBackend.MATH]
+
     def pinn_loss_3d(
         model: PINNFormer3D,
         x_colloc: torch.Tensor,
@@ -334,23 +342,32 @@ if _HAS_TORCH:
         cfg: Optional[PINNPhysicsConfig] = None,
         n_colloc: int = 8192,
         epochs: int = 10_000,
-        lr: float = 1e-3,
+        lr: float = 5e-4,
         T_sub: float = 320.0,
         T_night: float = 80.0,
         T_ocean_sub: float = 295.0,
         T_ocean_night: float = 270.0,
         device: str = "cuda",
         log_every: int = 500,
-    ) -> PINNFormer3D:
-        """Train the PINNFormer3D with selectable physics modules.
+        lambda_pde: float = 1.0,
+        grad_clip: float = 1.0,
+        eta_min_factor: float = 0.01,
+        verbose: bool = True,
+    ) -> Tuple[PINNFormer3D, TrainingHistory]:
+        """Train a PINNFormer3D and return ``(model, history)``.
 
-        Set ``cfg`` to control which PDE terms are active. If None,
-        defaults to ``PINNPhysicsConfig()`` (basic heat equation).
+        Parameters
+        ----------
+        lambda_pde : float
+            Weighting factor for the PDE residual loss relative to BC loss.
+        grad_clip : float
+            Maximum gradient norm for clipping (0 to disable).
+        eta_min_factor : float
+            Cosine-annealing minimum LR as a fraction of *lr*.
+        verbose : bool
+            Print per-epoch diagnostics when True.
         """
-        if cfg is None:
-            cfg = PINNPhysicsConfig()
-
-        if device == "cuda" and not torch.cuda.is_available():
+        if not torch.cuda.is_available() and device == "cuda":
             device = "cpu"
 
         print(f"  Physics: {cfg.summary()}")
@@ -359,7 +376,7 @@ if _HAS_TORCH:
         model = PINNFormer3D(n_outputs=cfg.n_output_fields).to(device)
         optimiser = torch.optim.Adam(model.parameters(), lr=lr)
         scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
-            optimiser, T_max=epochs
+            optimiser, T_max=epochs, eta_min=lr * eta_min_factor,
         )
 
         x_c = torch.rand(n_colloc, 3, device=device)
@@ -393,24 +410,112 @@ if _HAS_TORCH:
         print(f"\n  {header}")
         print(f"  {'-' * len(header)}")
 
+        history = TrainingHistory()
+
         for epoch in range(1, epochs + 1):
             optimiser.zero_grad()
-            losses = pinn_loss_3d(model, x_c, x_bc, bc_targets, cfg)
-            losses["total"].backward()
+            total, l_bc, l_pde, T_pred = pinn_loss_3d(
+                model, x_c, x_bc, T_bc,
+                lambda_pde=lambda_pde,
+                return_parts=True,
+            )
+            total.backward()
+
+            if grad_clip > 0:
+                nn.utils.clip_grad_norm_(model.parameters(), grad_clip)
+
             optimiser.step()
             scheduler.step()
 
             if epoch % log_every == 0 or epoch == 1:
-                row = (
-                    f"  {epoch:>8d} | {losses['total'].item():>10.4f} | "
-                    f"{losses['L_atm'].item():>10.4f} | {losses['L_bc'].item():>10.4f}"
-                )
-                if "L_oht" in losses:   row += f" | {losses['L_oht'].item():>10.4f}"
-                if "L_cloud" in losses: row += f" | {losses['L_cloud'].item():>10.4f}"
-                if "L_ice" in losses:   row += f" | {losses['L_ice'].item():>10.4f}"
-                print(row)
+                t_min = float(T_pred.min())
+                t_max = float(T_pred.max())
+                cur_lr = scheduler.get_last_lr()[0]
 
-        return model
+                history.epoch.append(epoch)
+                history.loss_total.append(total.item())
+                history.loss_bc.append(l_bc.item())
+                history.loss_pde.append(l_pde.item())
+                history.T_min.append(t_min)
+                history.T_max.append(t_max)
+                history.lr.append(cur_lr)
+
+                if verbose:
+                    print(
+                        f"Epoch {epoch:>6d}/{epochs}  "
+                        f"L_total={total.item():.4e}  "
+                        f"L_bc={l_bc.item():.4e}  "
+                        f"L_pde={l_pde.item():.4e}  "
+                        f"T∈[{t_min:.1f}, {t_max:.1f}]  "
+                        f"lr={cur_lr:.2e}"
+                    )
+
+                # Divergence early-warning
+                if t_max > 1e4 or t_min < -1e3:
+                    print(
+                        f"[WARN] Predicted T range [{t_min:.1f}, {t_max:.1f}] "
+                        "looks divergent — consider lowering lr or grad_clip."
+                    )
+
+        # ── Validation statistics on a fresh grid ──────────────────────────
+        history.validation = _compute_validation_stats(
+            model, device=device, lambda_pde=lambda_pde,
+        )
+        if verbose:
+            v = history.validation
+            print("\n── Validation (fresh 4 096-point grid) ──")
+            print(f"   PDE residual  RMSE : {v['pde_residual_rmse']:.4e}")
+            print(f"   PDE residual  max  : {v['pde_residual_max']:.4e}")
+            print(f"   Pred T  mean/min/max : "
+                  f"{v['T_mean']:.1f} / {v['T_min']:.1f} / {v['T_max']:.1f}")
+
+        return model, history
+
+    def _compute_validation_stats(
+        model: PINNFormer3D,
+        device: str = "cpu",
+        n_val: int = 4096,
+        lambda_pde: float = 1.0,
+    ) -> Dict[str, float]:
+        """Evaluate the trained model on a fresh uniform grid."""
+        model.eval()
+
+        # Build points *outside* no_grad so the autograd graph is intact
+        # for the second-order Laplacian computation.
+        x_v = torch.rand(n_val, 3, device=device)
+        x_v[:, 0] = x_v[:, 0] * np.pi - np.pi / 2
+        x_v[:, 1] = x_v[:, 1] * 2 * np.pi
+        x_v = x_v.requires_grad_(True)
+
+        with sdpa_kernel(_MATH_ONLY):
+            T_pred = model(x_v)
+
+        # First derivative — keep graph for second derivative
+        grad_T = torch.autograd.grad(T_pred.sum(), x_v, create_graph=True)[0]
+        laplacian = torch.zeros(n_val, device=device)
+        for i in range(3):
+            g2 = torch.autograd.grad(
+                grad_T[:, i].sum(), x_v,
+                create_graph=False, retain_graph=(i < 2),
+            )[0]
+            laplacian = laplacian + g2[:, i]
+
+        theta, phi = x_v[:, 0], x_v[:, 1]
+        S = S_MAX * torch.clamp(
+            torch.cos(theta.detach()) * torch.cos(phi.detach()), min=0,
+        )
+        residual = KAPPA * laplacian + S - SIGMA * T_pred.squeeze() ** 4
+
+        T_np = T_pred.detach().cpu().numpy().ravel()
+        res_np = residual.detach().cpu().numpy().ravel()
+        return {
+            "pde_residual_rmse": float(np.sqrt(np.mean(res_np ** 2))),
+            "pde_residual_max": float(np.max(np.abs(res_np))),
+            "T_mean": float(np.mean(T_np)),
+            "T_min": float(np.min(T_np)),
+            "T_max": float(np.max(T_np)),
+            "T_std": float(np.std(T_np)),
+        }
 
     # ── Persistence ──────────────────────────────────────────────────────
 

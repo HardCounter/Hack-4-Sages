@@ -105,7 +105,7 @@ def run_simulation_pipeline(params: dict) -> dict:
     """Full pipeline with built-in degradation at every stage."""
     gd = GracefulDegradation()
 
-    # L2: ELM → fallback to analytical
+    # L2: ELM → PINNFormer → analytical
     def elm_prediction():
         from modules.elm_surrogate import ELMClimateSurrogate
 
@@ -128,8 +128,37 @@ def run_simulation_pipeline(params: dict) -> dict:
             T_eq, tidally_locked=bool(params.get("tidally_locked", 1))
         )
 
+    def pinn_fallback():
+        from modules.astro_physics import equilibrium_temperature
+        from modules.pinnformer3d import load_pinnformer, predict_temperature_map
+        import torch
+
+        device = "cuda" if torch.cuda.is_available() else "cpu"
+        model = load_pinnformer("models/pinn3d_weights.pt", device=device)
+        raw = predict_temperature_map(model, n_lat=64, n_lon=128, z=0.5, device=device)
+        T_eq = equilibrium_temperature(
+            params["star_teff_K"],
+            params["star_radius_solar"],
+            params["semi_major_axis_au"],
+            params.get("albedo", 0.3),
+            bool(params.get("tidally_locked", True)),
+        )
+        T_sub = T_eq * 1.4
+        T_night = max(T_eq * 0.3, 40)
+        pmin, pmax = float(raw.min()), float(raw.max())
+        span = pmax - pmin
+        if span < 1e-3:
+            return np.full_like(raw, T_eq)
+        return T_night + (raw - pmin) / span * (T_sub - T_night)
+
+    def _pinn_or_analytical():
+        return gd.run_with_fallback(
+            pinn_fallback, analytical_fallback,
+            timeout=10.0, label="PINNFormer 3-D",
+        )
+
     temp_map = gd.run_with_fallback(
-        elm_prediction, analytical_fallback, timeout=5.0, label="ELM Surrogate"
+        elm_prediction, _pinn_or_analytical, timeout=5.0, label="ELM Surrogate"
     )
 
     _ICON_NO = "⬡"  # U+2B21 — change here to update this module's icon
