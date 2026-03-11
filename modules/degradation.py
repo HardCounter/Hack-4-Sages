@@ -61,13 +61,19 @@ class GracefulDegradation:
     def validate_temperature_map(temp_map: np.ndarray) -> bool:
         if temp_map is None:
             return False
-        if np.any(np.isnan(temp_map)):
+        try:
+            arr = np.asarray(temp_map, dtype=np.float64)
+        except (ValueError, TypeError):
             return False
-        if np.any(np.isinf(temp_map)):
+        if arr.size == 0:
             return False
-        if np.any(temp_map < 0):
+        if np.any(np.isnan(arr)):
             return False
-        if np.any(temp_map > 5000):
+        if np.any(np.isinf(arr)):
+            return False
+        if np.any(arr < 0):
+            return False
+        if np.any(arr > 5000):
             return False
         return True
 

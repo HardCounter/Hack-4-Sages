@@ -99,6 +99,17 @@ def create_3d_globe(
     cs = colorscale or SCIENCE_COLORSCALE
     T_min, T_max = float(temperature_map.min()), float(temperature_map.max())
 
+    lat_deg = np.degrees(PHI)
+    lon_deg = np.degrees(THETA)
+    hover_text = np.array([
+        [
+            f"<b>{tmap[i, j]:.1f} K</b><br>"
+            f"({lat_deg[i, j]:.1f}\u00b0, {lon_deg[i, j]:.1f}\u00b0)"
+            for j in range(n_lon)
+        ]
+        for i in range(n_lat)
+    ])
+
     surface = go.Surface(
         x=X, y=Y, z=Z,
         surfacecolor=tmap,
@@ -111,14 +122,8 @@ def create_3d_globe(
             thickness=20,
             x=1.02,
         ),
-        hovertemplate=(
-            "<b>%{surfacecolor:.1f} K</b><br>"
-            "(%{customdata[0]:.1f}\u00b0, %{customdata[1]:.1f}\u00b0)"
-            "<extra></extra>"
-        ),
-        customdata=np.stack(
-            [np.degrees(PHI), np.degrees(THETA)], axis=-1
-        ),
+        text=hover_text,
+        hoverinfo="text",
         lighting=dict(
             ambient=0.4, diffuse=0.6, specular=0.15,
             roughness=0.8, fresnel=0.1,
@@ -150,7 +155,8 @@ def create_3d_globe(
                 cmax=1.0,
                 showscale=False,
                 opacity=float(np.clip(cloud_opacity, 0.0, 1.0)),
-                hoverinfo="skip",
+                text=hover_text,
+                hoverinfo="text",
                 name="Cloud fraction",
             )
             fig.add_trace(cloud_surface)

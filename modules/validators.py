@@ -165,13 +165,13 @@ class SimulationOutput(BaseModel):
     @classmethod
     def validate_temperature_map(cls, v: Optional[List]) -> Optional[List]:
         if v is not None:
-            arr = np.array(v)
+            arr = np.asarray(v, dtype=np.float64)
+            if np.any(np.isnan(arr)):
+                raise ValueError("Temperature map contains NaN")
             if np.any(arr < 0):
                 raise ValueError("Temperature map contains negative values")
             if np.any(arr > 5000):
                 raise ValueError(
                     "Temperature map contains unphysically high values"
                 )
-            if np.any(np.isnan(arr)):
-                raise ValueError("Temperature map contains NaN")
         return v

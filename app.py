@@ -568,13 +568,14 @@ with tab_manual:
                 cloud_map = None
                 ice_map = None
                 ocean_map = None
+
                 if climate_model == "PINNFormer 3-D":
                     if not locked:
                         st.info(
                             "PINNFormer was trained for tidally locked planets. "
                             "Results are rescaled but the spatial pattern assumes tidal locking."
                         )
-                    temp_map = gd.run_with_fallback(
+                    raw_result = gd.run_with_fallback(
                         _pinn_predict,
                         lambda: gd.run_with_fallback(
                             _elm_predict, _analytical_fallback,
@@ -584,7 +585,7 @@ with tab_manual:
                         label="PINNFormer 3-D",
                     )
                 elif climate_model == "ELM Ensemble":
-                    temp_map = gd.run_with_fallback(
+                    raw_result = gd.run_with_fallback(
                         _elm_predict,
                         lambda: gd.run_with_fallback(
                             _pinn_predict, _analytical_fallback,
@@ -594,7 +595,15 @@ with tab_manual:
                         label="ELM Surrogate",
                     )
                 else:
-                    temp_map = _analytical_fallback()
+                    raw_result = _analytical_fallback()
+
+                if isinstance(raw_result, dict):
+                    temp_map = raw_result["temperature"]
+                    cloud_map = raw_result.get("cloud")
+                    ice_map = raw_result.get("ice")
+                    ocean_map = raw_result.get("ocean")
+                else:
+                    temp_map = raw_result
 
                 if not gd.validate_temperature_map(temp_map):
                     temp_map = _analytical_fallback()
