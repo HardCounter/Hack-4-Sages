@@ -166,13 +166,98 @@ def _dcr_memorization_check(
     }
 
 
+def _build_summary_stats_table(real_hab: pd.DataFrame, synthetic: pd.DataFrame) -> str:
+    """Build an HTML table comparing real vs synthetic summary statistics."""
+    rows_html = []
+    for col in COLS:
+        rv = real_hab[col].dropna()
+        sv = synthetic[col].dropna()
+        if rv.empty:
+            continue
+        pct_diff = abs(rv.mean() - sv.mean()) / (rv.mean() + 1e-12) * 100
+        emoji = "&#9989;" if pct_diff < 20 else ("&#9888;" if pct_diff < 50 else "&#10060;")
+        rows_html.append(
+            f"<tr>"
+            f"<td>{col}</td>"
+            f"<td>{rv.mean():.4g} &plusmn; {rv.std():.4g}</td>"
+            f"<td>{sv.mean():.4g} &plusmn; {sv.std():.4g}</td>"
+            f"<td>{len(rv)}</td><td>{len(sv)}</td>"
+            f"<td>{emoji} {pct_diff:.1f}%</td>"
+            f"</tr>"
+        )
+    header = (
+        "<tr><th>Parameter</th><th>Real (mean&plusmn;std)</th>"
+        "<th>Synthetic (mean&plusmn;std)</th>"
+        "<th>n_real</th><th>n_synth</th><th>Mean diff</th></tr>"
+    )
+    return f'<table class="ks-table">{header}{"".join(rows_html)}</table>'
+
+
+_TALKING_POINTS_HTML = """
+<h2>Key Talking Points — Class Imbalance &amp; Augmentation</h2>
+<div style="background:#1a1a2e;padding:16px;border-radius:8px;margin:12px 0">
+
+<h3>1. Why class imbalance is a core problem</h3>
+<p>Out of ~5 700 confirmed exoplanets, only ~60 fall into the
+habitable zone by standard criteria (radius 0.5–2.5 R⊕, stellar
+flux 0.2–2.0 S⊕, T_eff 2500–7000 K). That is roughly a <b>1:95
+imbalance ratio</b>. Any supervised model trained on raw counts
+will learn to predict "not habitable" almost every time and still
+achieve >98% accuracy — a classic accuracy paradox.</p>
+
+<h3>2. Why augmentation is hard for exoplanet data</h3>
+<ul>
+  <li><b>Multivariate coupling:</b> Planet parameters are not
+  independent — radius, mass, insolation, and orbital period are
+  linked by Kepler's third law, the mass–radius relation, and
+  stellar luminosity. Naïve oversampling (e.g., SMOTE) ignores
+  these astrophysical constraints and can produce planets that
+  violate conservation laws.</li>
+  <li><b>Small minority class:</b> With only ~60 real habitable
+  worlds, the CTGAN's generator has very few exemplars to learn
+  from, increasing the risk of <i>mode collapse</i> (generating
+  near-identical copies of the training set).</li>
+  <li><b>Right-skewed features:</b> Parameters like mass_earth
+  and period_days span orders of magnitude. Without
+  log-transforms, the GAN's internal Gaussian mixtures cannot
+  represent the long tails, producing physically absurd outputs.</li>
+</ul>
+
+<h3>3. How we safeguard against nonsense</h3>
+<ol>
+  <li><b>Log-transform before training:</b> We apply log1p to
+  right-skewed columns (mass, period, semi-major axis, stellar
+  parameters) before CTGAN training and reverse with expm1 after
+  sampling.</li>
+  <li><b>Hard physics filter:</b> Every synthetic planet passes
+  through <code>validate_synthetic_data()</code> which enforces
+  absolute physical bounds (e.g., radius 0.3–25 R⊕, T_eq 10–4000 K,
+  period > 0.1 d).</li>
+  <li><b>Percentile clipping:</b> After physics filtering, we clip
+  each column to its 1st–99th percentile range to remove long-tail
+  outliers that passed the coarse filter.</li>
+  <li><b>Post-hoc habitable envelope:</b> For conditional sampling
+  (habitable=1), we further restrict synthetic planets to lie within
+  the 1–99% quantile envelope of real habitable planets per feature.</li>
+  <li><b>DCR memorization check:</b> We compute Distance to Closest
+  Record (synth→real vs real↔real LOO) to verify the generator is
+  not simply memorizing training rows.</li>
+  <li><b>Clear labeling:</b> All synthetic data is explicitly marked
+  as <i>exploratory</i> in the UI — never presented as real
+  discoveries.</li>
+</ol>
+</div>
+"""
+
+
 def _build_html_report(
     real_hab: pd.DataFrame,
     synthetic: pd.DataFrame,
     ks_df: pd.DataFrame,
     dcr: dict | None = None,
 ) -> str:
-    """Build a standalone HTML report with histograms and correlation matrices."""
+    """Build a standalone HTML report with histograms, correlation matrices,
+    summary statistics, and augmentation talking points."""
     try:
         import plotly.graph_objects as go
         from plotly.subplots import make_subplots
@@ -180,6 +265,12 @@ def _build_html_report(
         return "<html><body><p>Plotly not installed — skipping visual report.</p></body></html>"
 
     sections = []
+
+    # --- Summary statistics table ---
+    sections.append(
+        "<h2>Summary Statistics — Real vs Synthetic (habitable subset)</h2>"
+        + _build_summary_stats_table(real_hab, synthetic)
+    )
 
     # --- Overlay histograms ---
     n = len(COLS)
@@ -208,16 +299,51 @@ def _build_html_report(
     )
     sections.append(fig_hist.to_html(full_html=False, include_plotlyjs="cdn"))
 
+    # --- Paired violin / box comparison ---
+    key_params = ["radius_earth", "mass_earth", "insol_earth", "t_eq_K"]
+    fig_violin = make_subplots(
+        rows=1, cols=len(key_params),
+        subplot_titles=key_params,
+    )
+    for i, col in enumerate(key_params):
+        rv = real_hab[col].dropna().values
+        sv = synthetic[col].dropna().values
+        fig_violin.add_trace(
+            go.Violin(y=rv, name="Real", side="negative",
+                      line_color="#2171b5", showlegend=(i == 0)),
+            row=1, col=i + 1,
+        )
+        fig_violin.add_trace(
+            go.Violin(y=sv, name="Synthetic", side="positive",
+                      line_color="#d73027", showlegend=(i == 0)),
+            row=1, col=i + 1,
+        )
+    fig_violin.update_layout(
+        height=400, width=1100,
+        title_text="Side-by-Side Violin — Key Habitable Parameters",
+        paper_bgcolor="#111", plot_bgcolor="#222", font=dict(color="white"),
+        violingap=0, violinmode="overlay",
+    )
+    sections.append(fig_violin.to_html(full_html=False, include_plotlyjs=False))
+
     # --- KS test table ---
     ks_html = ks_df.to_html(index=False, classes="ks-table", border=0)
-    sections.append(f"<h2>KS Tests (Real vs Synthetic)</h2>{ks_html}")
+    ks_pass = (ks_df["p_value"] > 0.05).sum()
+    ks_total = len(ks_df)
+    sections.append(
+        f"<h2>KS Tests (Real vs Synthetic)</h2>"
+        f"<p><b>{ks_pass}/{ks_total}</b> columns pass at p&gt;0.05</p>"
+        f"{ks_html}"
+    )
 
     # --- Correlation matrix comparison ---
     real_corr = real_hab[COLS].corr()
     synth_corr = synthetic[COLS].corr()
+    corr_diff = (real_corr - synth_corr).abs()
 
     fig_corr = make_subplots(
-        rows=1, cols=2, subplot_titles=["Real correlation", "Synthetic correlation"],
+        rows=1, cols=3,
+        subplot_titles=["Real correlation", "Synthetic correlation", "|Difference|"],
     )
     fig_corr.add_trace(
         go.Heatmap(z=real_corr.values, x=COLS, y=COLS,
@@ -226,12 +352,17 @@ def _build_html_report(
     )
     fig_corr.add_trace(
         go.Heatmap(z=synth_corr.values, x=COLS, y=COLS,
-                    colorscale="RdBu", zmin=-1, zmax=1),
+                    colorscale="RdBu", zmin=-1, zmax=1, showscale=False),
         row=1, col=2,
     )
+    fig_corr.add_trace(
+        go.Heatmap(z=corr_diff.values, x=COLS, y=COLS,
+                    colorscale="YlOrRd", zmin=0, zmax=1),
+        row=1, col=3,
+    )
     fig_corr.update_layout(
-        height=500, width=1100,
-        title_text="Correlation Matrix Comparison",
+        height=500, width=1400,
+        title_text="Correlation Matrix Comparison (+ absolute difference)",
         paper_bgcolor="#111", plot_bgcolor="#222", font=dict(color="white"),
     )
     sections.append(fig_corr.to_html(full_html=False, include_plotlyjs=False))
@@ -240,11 +371,11 @@ def _build_html_report(
     if dcr is not None:
         fig_dcr = go.Figure()
         fig_dcr.add_trace(go.Histogram(
-            x=dcr["dcr_real"], name="Real↔Real (LOO)",
+            x=dcr["dcr_real"], name="Real\u2194Real (LOO)",
             marker_color="#2171b5", opacity=0.6, nbinsx=60,
         ))
         fig_dcr.add_trace(go.Histogram(
-            x=dcr["dcr_synth"], name="Synth→Real",
+            x=dcr["dcr_synth"], name="Synth\u2192Real",
             marker_color="#d73027", opacity=0.6, nbinsx=60,
         ))
         fig_dcr.update_layout(
@@ -267,6 +398,9 @@ def _build_html_report(
             + fig_dcr.to_html(full_html=False, include_plotlyjs=False)
         )
 
+    # --- Talking points ---
+    sections.append(_TALKING_POINTS_HTML)
+
     body = "\n<hr>\n".join(sections)
     return (
         "<!DOCTYPE html><html><head><meta charset='utf-8'>"
@@ -274,6 +408,9 @@ def _build_html_report(
         "body{background:#111;color:#eee;font-family:sans-serif;padding:20px}"
         ".ks-table{border-collapse:collapse;margin:10px 0}"
         ".ks-table td,.ks-table th{padding:6px 12px;border:1px solid #555}"
+        "h2{color:#64b5f6;margin-top:32px}"
+        "h3{color:#90caf9}"
+        "code{background:#222;padding:2px 6px;border-radius:3px}"
         "</style></head><body>"
         f"<h1>CTGAN Diagnostics Report</h1>{body}"
         "</body></html>"
@@ -355,6 +492,35 @@ def main() -> None:
     with open(report_path, "w", encoding="utf-8") as f:
         f.write(html)
     print(f"\nHTML report saved to {report_path}")
+
+    # --- Talking points (console) ---
+    print("\n" + "=" * 80)
+    print("TALKING POINTS — Class Imbalance & Augmentation")
+    print("=" * 80)
+    print(
+        "\n1. CLASS IMBALANCE: ~60 habitable planets out of ~5 700 confirmed "
+        "(1:95 ratio).\n"
+        "   Any classifier trained on raw counts predicts 'not habitable'\n"
+        "   almost always and still hits >98% accuracy (accuracy paradox).\n"
+    )
+    print(
+        "2. WHY AUGMENTATION IS HARD:\n"
+        "   • Parameters are astrophysically coupled (Kepler's 3rd law,\n"
+        "     mass–radius relation, stellar luminosity). Naïve oversampling\n"
+        "     (SMOTE) ignores these constraints → unphysical planets.\n"
+        "   • Only ~60 minority exemplars → high risk of mode collapse.\n"
+        "   • Right-skewed features spanning orders of magnitude require\n"
+        "     log-transforms for the GAN's internal Gaussian mixtures.\n"
+    )
+    print(
+        "3. SAFEGUARDS AGAINST NONSENSE:\n"
+        "   • Log1p transform before CTGAN, expm1 after sampling.\n"
+        "   • Hard physics filter (validate_synthetic_data): absolute bounds.\n"
+        "   • 1–99% percentile clipping per column.\n"
+        "   • Post-hoc habitable envelope matching real HZ range.\n"
+        "   • DCR memorization check (synth→real vs real↔real LOO).\n"
+        "   • All synthetic data labeled 'exploratory' in the UI.\n"
+    )
 
 
 if __name__ == "__main__":
