@@ -153,6 +153,20 @@ class PINNPhysicsConfig:
         return names
 
 
+@dataclass
+class TrainingHistory:
+    """Lightweight container for PINN training diagnostics."""
+
+    epoch: List[int] = field(default_factory=list)
+    loss_total: List[float] = field(default_factory=list)
+    loss_bc: List[float] = field(default_factory=list)
+    loss_pde: List[float] = field(default_factory=list)
+    T_min: List[float] = field(default_factory=list)
+    T_max: List[float] = field(default_factory=list)
+    lr: List[float] = field(default_factory=list)
+    validation: Dict[str, float] = field(default_factory=dict)
+
+
 # ── Model architecture ───────────────────────────────────────────────────────
 
 if _HAS_TORCH:
@@ -241,11 +255,23 @@ if _HAS_TORCH:
         x_bc: torch.Tensor,
         bc_targets: Dict[str, torch.Tensor],
         cfg: PINNPhysicsConfig,
-    ) -> Dict[str, torch.Tensor]:
+        *,
+        lambda_pde: Optional[float] = None,
+        return_parts: bool = False,
+    ):
         """Compute the full physics-informed loss with per-component breakdown.
 
-        Returns a dict of named loss components plus ``"total"``.
+        When ``return_parts`` is False (default) this returns a dict of
+        named components (``L_atm``, ``L_bc``, optional ``L_oht``,
+        ``L_cloud``, ``L_ice``) plus ``"total"``.
+
+        When ``return_parts`` is True it instead returns a tuple
+        ``(total, L_bc, L_pde, T_atm)`` which is convenient for training
+        loops that track PDE loss and temperature ranges.
         """
+        if lambda_pde is None:
+            lambda_pde = cfg.lambda_pde
+
         x_colloc = x_colloc.requires_grad_(True)
         out = model(x_colloc)
         losses: Dict[str, torch.Tensor] = {}
@@ -329,10 +355,18 @@ if _HAS_TORCH:
             bc_idx += 1
         losses["L_bc"] = L_bc
 
-        total = losses["L_bc"] + cfg.lambda_pde * losses["L_atm"]
+        # Aggregate PDE-style losses with a configurable weighting for L_atm
+        L_pde = lambda_pde * losses["L_atm"]
         for k, v in losses.items():
             if k not in ("L_bc", "L_atm"):
-                total = total + v
+                L_pde = L_pde + v
+
+        total = L_bc + L_pde
+
+        if return_parts:
+            return total, L_bc, L_pde, T_atm
+
+        losses["L_pde"] = L_pde
         losses["total"] = total
         return losses
 
@@ -367,6 +401,9 @@ if _HAS_TORCH:
         verbose : bool
             Print per-epoch diagnostics when True.
         """
+        if cfg is None:
+            cfg = PINNPhysicsConfig()
+
         if not torch.cuda.is_available() and device == "cuda":
             device = "cpu"
 
@@ -415,7 +452,11 @@ if _HAS_TORCH:
         for epoch in range(1, epochs + 1):
             optimiser.zero_grad()
             total, l_bc, l_pde, T_pred = pinn_loss_3d(
-                model, x_c, x_bc, T_bc,
+                model,
+                x_c,
+                x_bc,
+                bc_targets,
+                cfg,
                 lambda_pde=lambda_pde,
                 return_parts=True,
             )
@@ -488,7 +529,9 @@ if _HAS_TORCH:
         x_v = x_v.requires_grad_(True)
 
         with sdpa_kernel(_MATH_ONLY):
-            T_pred = model(x_v)
+            out = model(x_v)
+            # Use the atmospheric temperature field for diagnostics
+            T_pred = out[:, 0]
 
         # First derivative — keep graph for second derivative
         grad_T = torch.autograd.grad(T_pred.sum(), x_v, create_graph=True)[0]
@@ -504,7 +547,7 @@ if _HAS_TORCH:
         S = S_MAX * torch.clamp(
             torch.cos(theta.detach()) * torch.cos(phi.detach()), min=0,
         )
-        residual = KAPPA * laplacian + S - SIGMA * T_pred.squeeze() ** 4
+        residual = KAPPA_ATM * laplacian + S - SIGMA * T_pred ** 4
 
         T_np = T_pred.detach().cpu().numpy().ravel()
         res_np = residual.detach().cpu().numpy().ravel()

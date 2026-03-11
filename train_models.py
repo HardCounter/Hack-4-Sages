@@ -201,7 +201,11 @@ def train_pinn(epochs: int = 5000, n_colloc: int = 8192, mode: str = "basic"):
 
     t0 = time.time()
     model, history = train_pinnformer(
-        n_colloc=n_colloc, epochs=epochs, device=device, log_every=500
+        cfg=cfg,
+        n_colloc=n_colloc,
+        epochs=epochs,
+        device=device,
+        log_every=500,
     )
     elapsed = time.time() - t0
     print(f"  Training completed in {elapsed/60:.1f} min")
