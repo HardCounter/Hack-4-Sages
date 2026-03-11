@@ -4,21 +4,27 @@ Graceful degradation manager.
 Wraps each system module with try/fallback logic so that a failure
 in any single component (LLM, ELM, 3-D renderer, CTGAN) does not
 crash the entire application — instead the system transparently
-downgrades to a simpler mode.
+downgrades to a simpler mode and displays an explicit banner
+indicating the active runtime profile.
 
 Degradation levels
 ------------------
-L1  LLM / agent unavailable   → manual sliders + algebraic calc
-L2  ELM generates unphysical  → PINNFormer 3-D (rescaled) → analytical cos^{1/4}
+L0  Dual-LLM mode active      → full orchestrator + astro-agent
+L0b Single-LLM mode active    → astro-agent only (lighter VRAM)
+L1  LLM / agent unavailable   → deterministic tools only
+L2  ELM generates unphysical  → analytical cos^{1/4} profile
 L3  3-D render timeout         → 2-D heatmap
 L4  CTGAN fails to converge    → NASA-only data (no augmentation)
 """
 
+import logging
 import time
 from typing import Any, Callable
 
 import numpy as np
 import streamlit as st
+
+logger = logging.getLogger(__name__)
 
 
 class GracefulDegradation:
@@ -40,6 +46,7 @@ class GracefulDegradation:
                     f"\u26a0\ufe0f {label} exceeded timeout "
                     f"({elapsed:.1f}s). Switching to simplified mode."
                 )
+                logger.warning("%s exceeded timeout (%.1fs)", label, elapsed)
                 return fallback_fn()
             return result
         except Exception as exc:
@@ -47,6 +54,7 @@ class GracefulDegradation:
                 f"\u26a0\ufe0f {label} failure: {exc}. "
                 "Switching to simplified mode."
             )
+            logger.warning("%s failure: %s", label, exc)
             return fallback_fn()
 
     @staticmethod
@@ -62,6 +70,35 @@ class GracefulDegradation:
         if np.any(temp_map > 5000):
             return False
         return True
+
+    @staticmethod
+    def check_ollama_available() -> bool:
+        """Return True if Ollama is reachable."""
+        try:
+            import ollama as _oll
+            _oll.list()
+            return True
+        except Exception:
+            return False
+
+    @staticmethod
+    def display_mode_banner(mode: str) -> None:
+        """Show an informational banner about the current runtime profile."""
+        if mode == "deterministic":
+            st.info(
+                "Running in **Deterministic Tools Only** mode. "
+                "All physics, ML, and visualization tools are active. "
+                "No LLM narratives or AI interpretation are available.",
+                icon="\u2699\ufe0f",
+            )
+        elif mode == "single_llm":
+            st.info(
+                "Running in **Single-LLM** mode (astro-agent). "
+                "One LLM handles both orchestration and domain expertise.",
+                icon="\U0001f916",
+            )
+        elif mode == "dual_llm":
+            pass  # no banner needed for full mode
 
 
 def run_simulation_pipeline(params: dict) -> dict:

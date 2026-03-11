@@ -169,9 +169,10 @@ _ICON_WARN = '<span style="color:#ff4b4b">⬢</span>'  # U+2B22  — warning (sl
 # ─── Cached loaders ──────────────────────────────────────────────────────────
 
 @st.cache_resource
-def _load_agent():
-    from modules.agent_setup import agent_executor
-    return agent_executor
+def _load_agent(mode: str = "dual_llm"):
+    from modules.agent_setup import AgentMode, build_agent
+    agent_mode = AgentMode(mode)
+    return build_agent(agent_mode)
 
 
 @st.cache_resource
@@ -206,6 +207,7 @@ for k, v in {
     "temperature_map": None,
     "analysis_history": [],
     "selected_planet": None,
+    "llm_mode": "dual_llm",
 }.items():
     if k not in st.session_state:
         st.session_state[k] = v
@@ -220,7 +222,7 @@ st.markdown(
     'color:#e0e0e0;margin:0">Autonomous Exoplanetary Digital Twin</h1>'
     '<p style="color:#90a4ae;font-size:clamp(.85rem,1.5vw,1rem);'
     'margin-top:.25rem;margin-bottom:0">'
-    'Simulate alien climates in real time with AI-driven physics surrogates.</p>'
+    'GCM-inspired climate surrogate explorer for exoplanets.</p>'
     '</div>'
     '</div>',
     unsafe_allow_html=True,
@@ -248,10 +250,16 @@ with tab_agent:
     with col_chat:
         st.subheader("Conversation with AstroAgent")
 
-        # Audience selector (enhancement B5)
+        if st.session_state["llm_mode"] == "deterministic":
+            st.warning(
+                "Running in **Deterministic Tools Only** mode — "
+                "no LLM agent available. Switch to Single-LLM or "
+                "Dual-LLM mode in the System tab to enable the agent."
+            )
+
         audience = st.radio(
             "Explanation depth",
-            ["Scientist", "Student", "Media"],
+            ["Scientist", "Outreach"],
             horizontal=True,
             index=0,
         )
@@ -263,8 +271,7 @@ with tab_agent:
         if prompt := st.chat_input("Ask about an exoplanet\u2026"):
             audience_hint = {
                 "Scientist": " (respond at expert level, cite equations)",
-                "Student": " (explain simply, use analogies)",
-                "Media": " (short, vivid language, no jargon)",
+                "Outreach": " (explain simply, use analogies and vivid language)",
             }
             full_prompt = prompt + audience_hint.get(audience, "")
 
@@ -281,12 +288,17 @@ with tab_agent:
                             cls = HumanMessage if m["role"] == "user" else AIMessage
                             lc_history.append(cls(content=m["content"]))
 
-                        agent = _load_agent()
-                        response = agent.invoke(
-                            {"input": full_prompt, "chat_history": lc_history}
-                        )
-                        answer = response["output"]
-                        steps = response.get("intermediate_steps", [])
+                        agent = _load_agent(st.session_state["llm_mode"])
+                        if agent is None:
+                            answer = ("Agent unavailable in Deterministic mode. "
+                                      "Switch to Single-LLM or Dual-LLM in the System tab.")
+                            steps = []
+                        else:
+                            response = agent.invoke(
+                                {"input": full_prompt, "chat_history": lc_history}
+                            )
+                            answer = response["output"]
+                            steps = response.get("intermediate_steps", [])
                     except Exception as exc:
                         answer = f"Agent unavailable: {exc}"
                         steps = []
@@ -366,8 +378,30 @@ with tab_manual:
                 "Semi-major axis [AU]", 0.01, 2.0, 0.0485, 0.001, format="%.4f",
                 help="Orbital semi-major axis in astronomical units",
             )
-            albedo = st.slider("Bond albedo", 0.0, 1.0, 0.3, 0.01,
-                help="Fraction of incident stellar radiation reflected by the planet")
+            eccentricity = st.slider("Eccentricity", 0.0, 0.9, 0.0, 0.01,
+                help="Orbital eccentricity (0 = circular)")
+            _SURFACE_LABELS = {
+                "Mixed rocky": "mixed_rocky",
+                "Ocean world": "ocean",
+                "Desert": "desert",
+                "Ice": "ice",
+            }
+            surface_type = _SURFACE_LABELS[st.selectbox("Surface type",
+                list(_SURFACE_LABELS.keys()),
+                help="Surface class for albedo estimation")]
+            _ATMO_ALBEDO_LABELS = {
+                "Thin": "thin",
+                "Temperate": "temperate",
+                "Thick/Cloudy": "thick_cloudy",
+            }
+            atmo_albedo_type = _ATMO_ALBEDO_LABELS[st.selectbox("Atmosphere (albedo)",
+                list(_ATMO_ALBEDO_LABELS.keys()), index=1,
+                help="Atmosphere class for albedo estimation")]
+            from modules.astro_physics import estimate_albedo
+            _albedo_est = estimate_albedo(surface_type, atmo_albedo_type)
+            albedo = st.slider("Bond albedo (override)", 0.0, 1.0,
+                _albedo_est["albedo"], 0.01,
+                help=f"Estimated: {_albedo_est['albedo']:.2f} ± {_albedo_est['albedo_uncertainty']:.2f}")
             locked = st.checkbox("Tidally locked", True)
             co_ratio = st.slider("C/O Ratio", 0.1, 1.5, 0.55, 0.01,
                 help="Carbon-to-Oxygen ratio. Solar \u2248 0.55")
@@ -404,6 +438,7 @@ with tab_manual:
     _curr = dict(
         star_teff=star_teff, star_radius=star_radius, planet_radius=planet_radius,
         planet_mass=planet_mass, semi_major=semi_major, albedo=albedo, locked=locked,
+        eccentricity=eccentricity,
         co_ratio=co_ratio, surface_pressure=surface_pressure, atm_type=atm_type,
         climate_model=climate_model,
     )
@@ -438,15 +473,19 @@ with tab_manual:
                     radius_earth=planet_radius,
                     mass_earth=planet_mass,
                     semi_major_axis=semi_major,
+                    eccentricity=eccentricity,
                     albedo=albedo,
                     tidally_locked=locked,
                 )
 
                 _pipeline.write("Computing habitability indices\u2026")
                 T_eq = equilibrium_temperature(
-                    star_teff, star_radius, semi_major, albedo, locked
+                    star_teff, star_radius, semi_major, albedo, locked,
+                    eccentricity=eccentricity,
                 )
-                S_abs, S_norm = stellar_flux(star_teff, star_radius, semi_major)
+                S_abs, S_norm = stellar_flux(
+                    star_teff, star_radius, semi_major, eccentricity=eccentricity,
+                )
                 density = estimate_density(planet_mass, planet_radius)
                 v_esc = estimate_escape_velocity(planet_mass, planet_radius)
                 esi = compute_esi(planet_radius, density, v_esc, T_eq)
@@ -461,6 +500,7 @@ with tab_manual:
 
                 _pipeline.write(f"Generating climate map ({climate_model})\u2026")
                 gd = GracefulDegradation()
+                _climate_method = "Analytical Fallback"
 
                 _elm_params = {
                     "radius_earth": planet_radius,
@@ -498,9 +538,36 @@ with tab_manual:
                         T_sub_target - T_night_target
                     )
 
+                def _pinn_predict():
+                    from modules.pinnformer3d import (
+                        load_pinnformer,
+                        sample_surface_map,
+                        sample_cloud_map,
+                        sample_ice_map,
+                        sample_ocean_map,
+                    )
+
+                    pinn = load_pinnformer()
+                    t_map = sample_surface_map(pinn, T_eq, tidally_locked=locked)
+                    n_lat, n_lon = t_map.shape
+
+                    cloud_map = sample_cloud_map(pinn, n_lat=n_lat, n_lon=n_lon)
+                    ice_map = sample_ice_map(pinn, n_lat=n_lat, n_lon=n_lon)
+                    ocean_map = sample_ocean_map(pinn, n_lat=n_lat, n_lon=n_lon)
+
+                    return {
+                        "temperature": t_map,
+                        "cloud": cloud_map,
+                        "ice": ice_map,
+                        "ocean": ocean_map,
+                    }
+
                 def _analytical_fallback():
                     return generate_eyeball_map(T_eq, tidally_locked=locked)
 
+                cloud_map = None
+                ice_map = None
+                ocean_map = None
                 if climate_model == "PINNFormer 3-D":
                     if not locked:
                         st.info(
@@ -532,10 +599,40 @@ with tab_manual:
                 if not gd.validate_temperature_map(temp_map):
                     temp_map = _analytical_fallback()
 
+                try:
+                    temp_map = _elm_predict()
+                    _climate_method = "ELM Ensemble"
+                    if not gd.validate_temperature_map(temp_map):
+                        temp_map = _analytical_fallback()
+                        _climate_method = "Analytical Fallback (ELM invalid)"
+                except Exception:
+                    try:
+                        pinn_fields = _pinn_predict()
+                        temp_map = pinn_fields["temperature"]
+                        _climate_method = "PINNFormer 3D"
+                        if not gd.validate_temperature_map(temp_map):
+                            temp_map = _analytical_fallback()
+                            _climate_method = "Analytical Fallback (PINN invalid)"
+                            cloud_map = None
+                            ice_map = None
+                            ocean_map = None
+                        else:
+                            cloud_map = pinn_fields.get("cloud")
+                            ice_map = pinn_fields.get("ice")
+                            ocean_map = pinn_fields.get("ocean")
+                    except Exception:
+                        temp_map = _analytical_fallback()
+                        _climate_method = "Analytical Fallback"
+
+                _pipeline.write(f"Climate method: **{_climate_method}**")
                 _pipeline.write("Computing surface fraction\u2026")
                 hsf = habitable_surface_fraction(temp_map)
 
                 st.session_state.temperature_map = temp_map
+                st.session_state.cloud_map = cloud_map
+                st.session_state.ice_map = ice_map
+                st.session_state.ocean_map = ocean_map
+                st.session_state["climate_method"] = _climate_method
                 st.session_state.current_planet_data = {
                     "T_eq": T_eq,
                     "T_min": float(temp_map.min()),
@@ -551,7 +648,9 @@ with tab_manual:
                     "planet_mass": planet_mass,
                     "semi_major": semi_major,
                     "albedo": albedo,
+                    "eccentricity": eccentricity,
                     "tidally_locked": locked,
+                    "climate_method": _climate_method,
                     "radius_gap": rg,
                     "sulfur": sulfur,
                     "co": co,
@@ -707,16 +806,82 @@ with tab_manual:
                         if co_d["classification"] == "carbon_planet":
                             st.error("Carbon-rich composition \u2014 liquid water unlikely")
 
-            # Globe / heatmap toggle
+            # ── Raw Data Export ──
+            with st.expander("Raw Data & CSV Export"):
+                _metrics_df = pd.DataFrame([{
+                    "T_eq_K": d["T_eq"],
+                    "T_min_K": d["T_min"],
+                    "T_max_K": d["T_max"],
+                    "T_mean_K": d["T_mean"],
+                    "ESI": d["ESI"],
+                    "SEPHI_score": d["SEPHI"]["sephi_score"],
+                    "HSF": d["HSF"],
+                    "flux_earth": d["flux_earth"],
+                    "albedo": d["albedo"],
+                    "eccentricity": d.get("eccentricity", 0.0),
+                    "tidally_locked": d["tidally_locked"],
+                }])
+                st.dataframe(_metrics_df, use_container_width=True)
+                st.download_button(
+                    "Download metrics CSV",
+                    data=_metrics_df.to_csv(index=False),
+                    file_name="simulation_metrics.csv",
+                    mime="text/csv",
+                )
+                _tmap_df = pd.DataFrame(
+                    st.session_state.temperature_map,
+                    columns=[f"lon_{i}" for i in range(st.session_state.temperature_map.shape[1])],
+                )
+                st.download_button(
+                    "Download temperature map CSV",
+                    data=_tmap_df.to_csv(index=False),
+                    file_name="temperature_map.csv",
+                    mime="text/csv",
+                )
+
+            # Climate method badge + Globe / heatmap toggle
+            _method = st.session_state.get("climate_method", "Unknown")
+            _method_colors = {
+                "ELM Ensemble": "#1a9850",
+                "PINNFormer 3D": "#6a3d9a",
+                "Analytical Fallback": "#d73027",
+            }
+            _mc = _method_colors.get(_method, "#90a4ae")
+            st.markdown(
+                f'<div style="display:inline-block;background:{_mc}22;border:1px solid {_mc};'
+                f'border-radius:8px;padding:4px 14px;font-size:.85rem;color:{_mc};'
+                f'font-family:\'Space Grotesk\',sans-serif;font-weight:600;margin-bottom:.5rem">'
+                f'Climate map: {_method}</div>',
+                unsafe_allow_html=True,
+            )
+
+            # Layer controls for 3-D visualisation
             view_mode = st.radio("View", ["3D Globe", "2D Heatmap"], horizontal=True)
 
             from modules.visualization import create_2d_heatmap, create_3d_globe
 
+            cloud_map = getattr(st.session_state, "cloud_map", None)
+
+            overlay_options = []
+            if cloud_map is not None:
+                overlay_options.append("Clouds (PINN)")
+
+            selected_overlays: list[str] = []
+            if view_mode == "3D Globe" and overlay_options:
+                selected_overlays = st.multiselect(
+                    "Overlays",
+                    overlay_options,
+                    default=overlay_options,  # show all available overlays by default
+                    help="Visualise diagnostic layers from the PINNFormer (e.g. cloud fraction).",
+                )
+
             if view_mode == "3D Globe":
+                cloud_overlay = cloud_map if "Clouds (PINN)" in selected_overlays else None
                 fig = create_3d_globe(
                     st.session_state.temperature_map,
                     "Custom Planet",
                     star_teff=star_teff,
+                    cloud_map=cloud_overlay,
                 )
             else:
                 fig = create_2d_heatmap(
@@ -804,7 +969,8 @@ with tab_catalog:
         except Exception as exc:
             st.error(f"ADQL search error: {exc}")
 
-    st.markdown("##### Famous Exoplanets")
+    st.markdown("##### Example Systems")
+    st.caption("Pre-loaded queries that trigger real NASA TAP lookups and the full computation pipeline.")
     famous = [
         {"name": "TRAPPIST-1 e", "desc": "Rocky, temperate, tidally locked"},
         {"name": "Proxima Cen b", "desc": "Closest habitable candidate"},
@@ -1106,7 +1272,7 @@ with tab_science:
                     _ok = _ICON_YES
                     _fail = _ICON_NO
                     st.markdown(
-                        f"{_ok if isa['plate_tectonics_likely'] else _fail} Plate tectonics &nbsp; "
+                        f"{_ok if isa['plate_tectonics'] == 'plausible' else (_ICON_WARN if isa['plate_tectonics'] == 'uncertain' else _fail)} Plate tectonics ({isa['plate_tectonics']}) &nbsp; "
                         f"{_ok if isa['carbonate_silicate_cycle'] else _fail} C-Si cycle &nbsp; "
                         f"{_ok if isa['water_cycling'] else _fail} Water cycling &nbsp; "
                         f"{_ok if isa['volatile_retention'] else _fail} Volatile retention",
@@ -1217,7 +1383,80 @@ with tab_science:
                 uncert_cols[1].metric("ESI \u00b1", "\u00b10.05 (propagated)")
                 uncert_cols[2].metric("HSF \u00b1", "\u00b15 pp")
 
-        # Row 5: Compare with Earth | Planetary Soundscape
+        # Row 5: GCM Benchmark Comparison (full-width)
+        with st.container(border=True):
+            st.subheader("GCM Benchmark Comparison")
+            st.caption(
+                "Qualitative comparison of surrogate output against "
+                "precomputed GCM reference profiles. These are approximate "
+                "digitizations from published GCM studies, not full GCM reruns."
+            )
+            try:
+                from modules.gcm_benchmarks import (
+                    compare_surrogate_to_gcm,
+                    compute_zonal_mean,
+                    get_gcm_benchmark,
+                    list_benchmarks,
+                )
+                _bench_key = st.selectbox(
+                    "Select benchmark case",
+                    list_benchmarks(),
+                    format_func=lambda k: {
+                        "earth_like": "Earth-like aquaplanet (Del Genio 2019)",
+                        "proxima_b": "Proxima Cen b tidally locked (Turbet 2016)",
+                        "hot_rock": "Hot synchronous rock (Leconte 2013)",
+                    }.get(k, k),
+                )
+                if st.button("Compare with GCM"):
+                    bench = get_gcm_benchmark(_bench_key)
+                    if bench is not None:
+                        gcm_map = bench["temperature_map"]
+                        surr_map = tmap
+                        if surr_map.shape != gcm_map.shape:
+                            from scipy.ndimage import zoom
+                            scale = (gcm_map.shape[0] / surr_map.shape[0],
+                                     gcm_map.shape[1] / surr_map.shape[1])
+                            surr_map = zoom(surr_map, scale, order=1)
+
+                        metrics = compare_surrogate_to_gcm(surr_map, gcm_map)
+
+                        mc1, mc2, mc3, mc4 = st.columns(4)
+                        mc1.metric("Pattern correlation", f"{metrics['pattern_correlation']:.3f}")
+                        mc2.metric("RMSE", f"{metrics['rmse_K']:.1f} K")
+                        mc3.metric("Bias", f"{metrics['bias_K']:+.1f} K")
+                        mc4.metric("Zonal RMSE", f"{metrics['zonal_mean_rmse_K']:.1f} K")
+
+                        surr_zonal = compute_zonal_mean(surr_map)
+                        gcm_zonal = compute_zonal_mean(gcm_map)
+                        lats = np.linspace(-90, 90, len(surr_zonal))
+
+                        fig_zonal = go.Figure()
+                        fig_zonal.add_trace(go.Scatter(
+                            x=lats, y=surr_zonal, mode="lines",
+                            name="Surrogate (ELM/PINNFormer)",
+                        ))
+                        fig_zonal.add_trace(go.Scatter(
+                            x=lats, y=gcm_zonal, mode="lines",
+                            name=f"GCM ({bench['source']})",
+                            line=dict(dash="dash"),
+                        ))
+                        fig_zonal.update_layout(
+                            xaxis_title="Latitude [deg]",
+                            yaxis_title="Zonal mean T [K]",
+                            paper_bgcolor="black",
+                            plot_bgcolor="rgba(0,0,0,0)",
+                            font=dict(color="white"),
+                            height=_CHART_H,
+                            margin=dict(l=40, r=20, t=30, b=40),
+                        )
+                        st.plotly_chart(fig_zonal, use_container_width=True)
+                        st.caption(f"Source: {bench['source']}")
+                    else:
+                        st.warning("Benchmark case not found.")
+            except Exception as exc:
+                st.warning(f"GCM comparison unavailable: {exc}")
+
+        # Row 6: Compare with Earth | Planetary Soundscape
         st.markdown(
             """<style>
             div[data-testid="stHorizontalBlock"]:has(> div > div > div[data-testid="stVerticalBlockBorderWrapper"])
@@ -1252,7 +1491,11 @@ with tab_science:
 
         with row5_right:
             with st.container(border=True):
-                st.subheader("Planetary Soundscape")
+                st.subheader("Outreach: Planetary Soundscape")
+                st.caption(
+                    "Temperature-to-frequency sonification for outreach and "
+                    "engagement purposes. This is **not** a scientific diagnostic."
+                )
                 if st.button("Generate sound"):
                     from scipy.io import wavfile
 
@@ -1281,6 +1524,42 @@ with tab_science:
 
 with tab_system:
     st.subheader("System Health & Diagnostics")
+
+    # ── LLM Mode Selector ──
+    with st.container(border=True):
+        st.markdown("##### LLM Runtime Mode")
+        _MODE_OPTIONS = {
+            "Dual-LLM (orchestrator + astro-agent)": "dual_llm",
+            "Single-LLM (astro-agent only)": "single_llm",
+            "Deterministic (no LLM)": "deterministic",
+        }
+        _MODE_LABELS = list(_MODE_OPTIONS.keys())
+        _current_label = [k for k, v in _MODE_OPTIONS.items()
+                          if v == st.session_state["llm_mode"]][0]
+        selected_label = st.radio(
+            "Select runtime mode",
+            _MODE_LABELS,
+            index=_MODE_LABELS.index(_current_label),
+            horizontal=True,
+            help=(
+                "Dual-LLM: Qwen 2.5-14B orchestrator + AstroSage-8B expert (~12 GB VRAM). "
+                "Single-LLM: AstroSage-8B handles both roles (~5 GB VRAM). "
+                "Deterministic: physics + ML tools only, no AI narratives."
+            ),
+        )
+        new_mode = _MODE_OPTIONS[selected_label]
+        if new_mode != st.session_state["llm_mode"]:
+            st.session_state["llm_mode"] = new_mode
+            from modules.llm_helpers import set_llm_mode
+            set_llm_mode(new_mode)
+            st.rerun()
+
+        _mode_desc = {
+            "dual_llm": "Two LLM instances: Qwen 2.5-14B (orchestration) + AstroSage-8B (domain expertise).",
+            "single_llm": "One LLM instance: AstroSage-8B handles both tool orchestration and interpretation.",
+            "deterministic": "No LLM loaded. All physics, ML, and visualization tools remain functional.",
+        }
+        st.caption(_mode_desc[st.session_state["llm_mode"]])
 
     if st.button("Run Self-Diagnostics"):
         checks = {}

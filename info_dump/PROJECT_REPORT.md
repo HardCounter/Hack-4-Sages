@@ -44,9 +44,17 @@
 
 ## 1. Project Overview
 
-The **Autonomous Exoplanetary Digital Twin** is a browser-based application that simulates alien climates in near real-time. It replaces computationally expensive General Circulation Models (GCMs, e.g. NASA ROCKE-3D, which require days of supercomputer time) with fast ML surrogates that produce results in seconds.
+The **Autonomous Exoplanetary Digital Twin** is a browser-based climate-surrogate explorer for exoplanets. It uses fast ML surrogates inspired by GCM literature to produce approximate climate maps in seconds, enabling rapid parameter-space exploration that would be infeasible with full 3-D GCMs (e.g. NASA ROCKE-3D).
 
-**Core value proposition:** A user types a natural-language question about an exoplanet; an AI agent autonomously queries NASA, computes habitability indices, runs a climate simulation, consults a domain-expert LLM, and returns an interpreted answer with a 3D interactive globe — all within seconds.
+**Core value proposition:** A user types a natural-language question about an exoplanet; an AI agent autonomously queries NASA, computes habitability indices, runs a climate simulation, optionally consults a domain-expert LLM, and returns an interpreted answer with a 3D interactive globe — all within seconds.
+
+> **Scope & Non-Goals**
+> - The ELM ensemble and analytical models are trained on analytically generated data, **not** calibrated against ROCKE-3D or ExoCAM. Outputs are hypothesis-generating approximations.
+> - PINNFormer 3D is an **experimental** PDE surrogate, not a production GCM replacement.
+> - No time-evolving atmosphere, cloud feedback, or ocean heat transport is modeled yet.
+> - The system does not implement bidirectional data assimilation and is therefore a *digital-twin-inspired* surrogate, not a classical digital twin.
+> - A small set of precomputed GCM benchmark cases is included for qualitative comparison only.
+> - See `info_dump/judge_critique_response.md` for a full critique-response log.
 
 ### Key Capabilities
 
@@ -868,6 +876,10 @@ SYSTEM """You are AstroAgent, an expert astrophysics assistant..."""
 
 ### Gemini Deep-Dives (`info_dump/gemini_deep/`)
 - 5 PDF documents with AI-generated analyses of the project concept, hackathon planning, and transformer/LLM strategies
+- **Note:** These are **non-authoritative planning aids** generated during the early brainstorming phase. They are not core scientific artifacts and should not be treated as team-authored analysis. Retained for process transparency.
+
+### Judge Critique Response (`info_dump/judge_critique_response.md`)
+- Structured record of the lead-judge critique, thematic issue groupings, and planned remediation actions for v1.1.
 
 ---
 

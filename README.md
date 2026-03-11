@@ -1,6 +1,14 @@
 # Autonomous Exoplanetary Digital Twin
 
-A real-time, browser-based platform that simulates alien climates using AI-driven physics surrogates. Built for the HACK-4-SAGES hackathon.
+A real-time, browser-based climate-surrogate explorer for exoplanets, inspired by GCM literature and digital-twin concepts. Built for the HACK-4-SAGES hackathon.
+
+> **Scope & Non-Goals:** The ML surrogates (ELM ensemble, PINNFormer 3D) are trained on
+> analytically generated data and are **not** calibrated against full 3-D General
+> Circulation Models (ROCKE-3D, ExoCAM). Outputs are hypothesis-generating
+> approximations intended for rapid triage and education, not peer-review-grade
+> climate predictions. The system does not implement bidirectional data
+> assimilation and is therefore a *digital-twin-inspired* surrogate, not a
+> classical digital twin.
 
 ## What it does
 
@@ -12,10 +20,20 @@ A real-time, browser-based platform that simulates alien climates using AI-drive
 - **Anomaly detection** — Isolation Forest identifies statistically unusual planets in the NASA catalog; UMAP provides 2-D population visualization.
 - **Augment data** — a CTGAN synthesises thousands of physically plausible habitable-planet configurations to fix the extreme class imbalance in real catalogs.
 - **3-D visualisation** — interactive Plotly globe with rotation animation, scientific colour-mapping, host-star marker, and 2-D heatmap fallback.
-- **LLM agent** — a dual-model LangChain agent (Qwen 2.5 orchestrator + astro-specialist) with multi-turn memory, 8 tools, and mandatory domain-expert consultation.
-- **RAG citations** — ChromaDB vector store of 15 key astrophysics papers; the agent cites real literature to support claims.
+- **LLM agent** — a LangChain agent with configurable single-LLM or dual-LLM mode (Qwen 2.5 orchestrator + astro-specialist), multi-turn memory, 11 tools, and optional domain-expert consultation.
+- **RAG citations** — ChromaDB vector store of 40 peer-reviewed astrophysics papers; the agent cites real literature to support claims.
 - **Physics guardrails** — Pydantic validators reject any output that violates thermodynamic or astrophysical constraints.
 - **Graceful degradation** — every module has a fallback path so the app never crashes.
+
+## Runtime Profiles
+
+| Profile | What it needs | What works |
+|---------|--------------|------------|
+| **Deterministic** | Python + pip dependencies | Physics, ELM surrogate, PINNFormer, visualization, CSV export |
+| **Single-LLM** | + Ollama + astro-agent model (~4.5 GB) | + AI narratives, chat agent, ADQL generation (one LLM) |
+| **Dual-LLM** | + Ollama + Qwen 2.5-14B (~9 GB) + astro-agent | + Separate orchestrator and domain expert (recommended for demos) |
+
+Select the mode in the **System** tab. The app degrades gracefully: if Ollama is unavailable, all physics/ML tools remain functional.
 
 ## Requirements
 
@@ -25,7 +43,7 @@ A real-time, browser-based platform that simulates alien climates using AI-drive
 | RAM | 8 GB | 16 GB |
 | GPU | — | NVIDIA RTX with 8+ GB VRAM (CUDA) |
 | Disk | 5 GB | 15 GB (includes LLM weights) |
-| Ollama | latest | latest |
+| Ollama | latest (for LLM modes) | latest |
 
 ## Quick start
 
@@ -222,12 +240,16 @@ Hack-4-Sages/
 
 ```bash
 docker build -t exo-twin .
-docker run -p 8501:8501 --gpus all exo-twin
+
+# Run with model weights mounted from the host (recommended for production)
+docker run -p 8501:8501 --gpus all \
+  -v $(pwd)/models:/app/models \
+  exo-twin
 ```
 
 Then open **http://localhost:8501**.
 
-Note: Ollama must run separately or be added as a service in a `docker-compose.yml`.
+Note: Ollama must run separately or be added as a service in a `docker-compose.yml`. For long-term deployments, mount the `/app/models` directory as a Docker volume rather than baking mutable `.pkl`/`.pt` files into the image.
 
 ## Running tests
 
