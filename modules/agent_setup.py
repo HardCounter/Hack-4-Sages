@@ -59,7 +59,7 @@ def _get_primary_llm() -> ChatOllama:
 def _get_domain_llm() -> ChatOllama:
     global _domain_llm
     if _domain_llm is None:
-        _domain_llm = _make_llm("astrosage")
+        _domain_llm = _make_llm("astro-agent")
     return _domain_llm
 
 

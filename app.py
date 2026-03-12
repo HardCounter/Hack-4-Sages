@@ -949,8 +949,8 @@ with tab_manual:
                         st.warning(review)
                     else:
                         st.info(review)
-                except Exception:
-                    st.caption("*AI interpretation unavailable (Ollama not running).*")
+                except Exception as exc:
+                    st.caption(f"*AI interpretation unavailable — {exc}*")
         else:
             st.info("Adjust parameters and press **Run Simulation** (or enable live mode).")
 

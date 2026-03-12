@@ -30,7 +30,7 @@ except ImportError:
 
 # ─── Model resolution ─────────────────────────────────────────────────────────
 
-_DOMAIN_MODEL = "astrosage"
+_DOMAIN_MODEL = "astro-agent"
 _ORCHESTRATOR_MODEL = "qwen2.5:14b"
 _ACTIVE_MODE: str = "dual_llm"
 
@@ -80,6 +80,14 @@ def sanitize_latex(text: str) -> str:
 # ─── Low-level callers ────────────────────────────────────────────────────────
 
 
+def _extract_content(resp) -> str:
+    """Extract message content from an Ollama response (handles both old dict and new object API)."""
+    try:
+        return resp.message.content
+    except AttributeError:
+        return resp["message"]["content"]
+
+
 def _ask_domain(prompt: str) -> str:
     """Send a single prompt to the AstroSage domain expert."""
     if not _HAS_OLLAMA:
@@ -88,7 +96,7 @@ def _ask_domain(prompt: str) -> str:
         model=_DOMAIN_MODEL,
         messages=[{"role": "user", "content": prompt}],
     )
-    return resp["message"]["content"]
+    return _extract_content(resp)
 
 
 def _ask_orchestrator(prompt: str) -> str:
@@ -100,14 +108,15 @@ def _ask_orchestrator(prompt: str) -> str:
         model=model,
         messages=[{"role": "user", "content": prompt}],
     )
-    return resp["message"]["content"]
+    return _extract_content(resp)
 
 
 def _safe(fn, *args, fallback: str = "") -> str:
     """Call *fn* and return its result; on any error return *fallback*."""
     try:
         return fn(*args)
-    except Exception:
+    except Exception as exc:
+        logger.warning("LLM helper %s failed: %s", fn.__name__, exc)
         return fallback
 
 
