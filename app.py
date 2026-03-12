@@ -1640,16 +1640,13 @@ with tab_system:
     # ── Temperature Unit Selector ──
     with st.container(border=True):
         st.markdown("##### Temperature Display Unit")
-        _unit_choice = st.radio(
+        st.radio(
             "Select temperature unit",
             ["K", "°C"],
-            index=0 if st.session_state["temp_unit"] == "K" else 1,
             horizontal=True,
+            key="temp_unit",
             help="Switch between Kelvin and Celsius for all temperature displays.",
         )
-        if _unit_choice != st.session_state["temp_unit"]:
-            st.session_state["temp_unit"] = _unit_choice
-            st.rerun()
         st.caption(
             "Kelvin (K) — standard astrophysical unit."
             if st.session_state["temp_unit"] == "K"
