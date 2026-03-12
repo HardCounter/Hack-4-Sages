@@ -13,7 +13,7 @@ The active mode is selected at agent-creation time via ``build_agent(mode)``.
 import json
 import logging
 from enum import Enum
-from typing import Optional
+from typing import Any, Optional
 
 from langchain.agents import AgentExecutor, create_tool_calling_agent
 from langchain.tools import tool
@@ -21,6 +21,25 @@ from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
 from langchain_ollama import ChatOllama
 
 logger = logging.getLogger(__name__)
+
+
+# ─── Agent visualization state ────────────────────────────────────────────────
+
+def _update_agent_viz(**kwargs):
+    """Accumulate visualization artifacts for the Agent AI tab.
+
+    Stores data in ``st.session_state["_agent_viz"]`` so the Streamlit UI
+    can render the same interactive dashboards as Manual Mode.  Silently
+    no-ops when called outside a Streamlit context (e.g. in tests).
+    """
+    try:
+        import streamlit as _st
+        if "_agent_viz" not in _st.session_state:
+            _st.session_state["_agent_viz"] = {}
+        _st.session_state["_agent_viz"].update(kwargs)
+    except Exception:
+        pass
+
 
 # ─── Runtime modes ─────────────────────────────────────────────────────────────
 
@@ -93,7 +112,105 @@ def query_nasa_archive(planet_name: str) -> str:
     data = get_planet_data(planet_name)
     if data is None:
         return f"Planet not found: {planet_name}"
+    _update_agent_viz(planet_name=planet_name)
     return data.to_json()
+
+
+@tool
+def search_planet_catalog(
+    radius_min_earth: float = 0.5,
+    radius_max_earth: float = 2.5,
+    mass_min_earth: float = 0.0,
+    mass_max_earth: float = 20.0,
+    eccentricity_min: float = 0.0,
+    eccentricity_max: float = 1.0,
+    teff_min: int = 2500,
+    teff_max: int = 7000,
+    max_results: int = 20,
+) -> str:
+    """Search the NASA Exoplanet Archive catalog with physical criteria.
+
+    Use this when the user asks to FIND or FILTER planets by properties
+    (e.g. "terrestrial planets with high eccentricity", "rocky planets
+    around M-dwarfs", "super-Earths in the habitable zone").
+
+    Do NOT use query_nasa_archive for catalog searches — that tool only
+    looks up a single planet by its exact catalogue name.
+
+    Args:
+        radius_min_earth: Minimum planet radius [R_Earth] (default 0.5).
+        radius_max_earth: Maximum planet radius [R_Earth] (default 2.5).
+        mass_min_earth: Minimum planet mass [M_Earth] (default 0.0).
+        mass_max_earth: Maximum planet mass [M_Earth] (default 20.0).
+        eccentricity_min: Minimum orbital eccentricity (default 0.0).
+        eccentricity_max: Maximum orbital eccentricity (default 1.0).
+        teff_min: Minimum host star temperature [K] (default 2500).
+        teff_max: Maximum host star temperature [K] (default 7000).
+        max_results: Maximum number of results to return (default 20).
+    """
+    from modules.nasa_client import query_nasa_archive as _nasa_query
+
+    R_JUP_PER_EARTH = 1.0 / 11.209
+    M_JUP_PER_EARTH = 1.0 / 317.83
+
+    r_min_jup = radius_min_earth * R_JUP_PER_EARTH
+    r_max_jup = radius_max_earth * R_JUP_PER_EARTH
+    m_min_jup = mass_min_earth * M_JUP_PER_EARTH
+    m_max_jup = mass_max_earth * M_JUP_PER_EARTH
+
+    clauses = [
+        f"pl_radj BETWEEN {r_min_jup:.6f} AND {r_max_jup:.6f}",
+        f"st_teff BETWEEN {teff_min} AND {teff_max}",
+        "pl_radj IS NOT NULL",
+        "pl_bmassj IS NOT NULL",
+        "st_teff IS NOT NULL",
+        "pl_orbsmax IS NOT NULL",
+    ]
+    if mass_min_earth > 0 or mass_max_earth < 20:
+        clauses.append(f"pl_bmassj BETWEEN {m_min_jup:.8f} AND {m_max_jup:.6f}")
+    if eccentricity_min > 0 or eccentricity_max < 1:
+        clauses.append("pl_orbeccen IS NOT NULL")
+        clauses.append(
+            f"pl_orbeccen BETWEEN {eccentricity_min:.4f} AND {eccentricity_max:.4f}"
+        )
+
+    where = " AND ".join(clauses)
+    adql = (
+        "SELECT TOP " + str(min(max_results, 50)) + " "
+        "pl_name, pl_radj, pl_bmassj, pl_orbsmax, pl_orbper, "
+        "pl_orbeccen, pl_insol, pl_eqt, pl_dens, "
+        "st_teff, st_rad, st_lum, st_mass "
+        f"FROM pscomppars WHERE {where} "
+        "ORDER BY pl_insol ASC"
+    )
+
+    try:
+        df = _nasa_query(adql)
+    except Exception as exc:
+        return f"NASA catalog search failed: {exc}"
+
+    if df.empty:
+        return "No planets matched the search criteria."
+
+    summary_rows = []
+    for _, row in df.iterrows():
+        r_e = float(row.get("pl_radj", 0)) * 11.209
+        m_e = float(row.get("pl_bmassj", 0)) * 317.83
+        ecc = row.get("pl_orbeccen", "?")
+        summary_rows.append(
+            f"- **{row.get('pl_name', '?')}**: "
+            f"R={r_e:.2f} R⊕, M={m_e:.2f} M⊕, "
+            f"a={row.get('pl_orbsmax', '?')} AU, "
+            f"e={ecc}, "
+            f"T*={row.get('st_teff', '?')} K"
+        )
+
+    return (
+        f"Found {len(df)} planets matching criteria:\n"
+        + "\n".join(summary_rows)
+        + "\n\nUse query_nasa_archive(planet_name) to get full data for any of these, "
+        "then compute_habitability and run_climate_simulation for visual analysis."
+    )
 
 
 @tool
@@ -105,10 +222,12 @@ def compute_habitability(
     semi_major_axis: float,
     albedo: float = 0.3,
     tidally_locked: bool = True,
+    eccentricity: float = 0.0,
 ) -> str:
     """Compute habitability indices (T_eq, ESI, SEPHI, flux).
 
-    Call this after retrieving NASA data.
+    Call this after retrieving NASA data.  Results are automatically
+    visualised in the dashboard (ESI gauge, SEPHI badges, HZ diagram, etc.).
 
     Args:
         stellar_temp: Host star effective temperature [K].
@@ -118,8 +237,15 @@ def compute_habitability(
         semi_major_axis: Orbital semi-major axis [AU].
         albedo: Bond albedo (default 0.3).
         tidally_locked: Whether the planet is tidally locked.
+        eccentricity: Orbital eccentricity (default 0.0).
     """
-    from modules.astro_physics import compute_full_analysis
+    from modules.astro_physics import (
+        assess_co_ratio,
+        assess_sulfur_chemistry,
+        classify_radius_gap,
+        compute_full_analysis,
+        hz_boundaries,
+    )
 
     result = compute_full_analysis(
         stellar_temp,
@@ -129,7 +255,41 @@ def compute_habitability(
         semi_major_axis,
         albedo,
         tidally_locked,
+        eccentricity,
     )
+
+    _update_agent_viz(
+        analysis=result,
+        star_teff=stellar_temp,
+        star_radius=stellar_radius,
+        semi_major=semi_major_axis,
+        planet_radius=result["radius_earth"],
+        planet_mass=result["mass_earth"],
+        albedo=albedo,
+        eccentricity=eccentricity,
+        tidally_locked=tidally_locked,
+    )
+
+    try:
+        lum = (stellar_temp / 5778) ** 4 * stellar_radius ** 2
+        hz = hz_boundaries(stellar_temp, lum)
+        _update_agent_viz(hz_boundaries=hz)
+    except Exception:
+        pass
+
+    try:
+        rg = classify_radius_gap(result["radius_earth"])
+        _update_agent_viz(radius_gap=rg)
+    except Exception:
+        pass
+
+    try:
+        sulfur = assess_sulfur_chemistry(result["T_eq_K"], 1.0, "h2_rich")
+        co = assess_co_ratio(0.55)
+        _update_agent_viz(sulfur=sulfur, co=co)
+    except Exception:
+        pass
+
     return json.dumps(result, indent=2, default=str)
 
 
@@ -145,6 +305,7 @@ def classify_planet_radius_gap(radius_earth: float) -> str:
     """
     from modules.astro_physics import classify_radius_gap
     result = classify_radius_gap(radius_earth)
+    _update_agent_viz(radius_gap=result)
     return json.dumps(result, indent=2)
 
 
@@ -166,6 +327,7 @@ def predict_sulfur_chemistry(
     """
     from modules.astro_physics import assess_sulfur_chemistry
     result = assess_sulfur_chemistry(t_eq, surface_pressure_bar, atmosphere_type)
+    _update_agent_viz(sulfur=result)
     return json.dumps(result, indent=2)
 
 
@@ -181,6 +343,7 @@ def assess_carbon_oxygen_ratio(co_ratio: float) -> str:
     """
     from modules.astro_physics import assess_co_ratio
     result = assess_co_ratio(co_ratio)
+    _update_agent_viz(co=result)
     return json.dumps(result, indent=2)
 
 
@@ -195,9 +358,11 @@ def run_climate_simulation(
     albedo: float = 0.3,
     tidally_locked: int = 1,
 ) -> str:
-    """Run the ELM climate surrogate to predict a surface temperature map.
+    """Run the climate surrogate to predict a surface temperature map.
 
-    Use this to generate the 2-D temperature distribution on a planet.
+    Uses ELM → PINNFormer → Analytical fallback chain.  The resulting
+    temperature map, cloud overlay, and derived metrics are automatically
+    displayed as an interactive 3-D globe in the dashboard.
 
     Args:
         radius_earth: Planet radius [R⊕].
@@ -209,9 +374,14 @@ def run_climate_simulation(
         albedo: Bond albedo (default 0.3).
         tidally_locked: 1 if tidally locked, 0 otherwise.
     """
+    from modules.astro_physics import equilibrium_temperature, habitable_surface_fraction
     from modules.elm_surrogate import ELMClimateSurrogate
     from modules.visualization import generate_eyeball_map
-    from modules.astro_physics import equilibrium_temperature
+
+    locked = bool(tidally_locked)
+    T_eq = equilibrium_temperature(
+        star_teff_K, star_radius_solar, semi_major_axis_au, albedo, locked,
+    )
 
     params = {
         "radius_earth": radius_earth,
@@ -224,16 +394,48 @@ def run_climate_simulation(
         "tidally_locked": tidally_locked,
     }
 
+    cloud_map = None
+    climate_method = "Analytical Fallback"
+
     try:
         model = ELMClimateSurrogate()
         model.load("models/elm_ensemble.pkl")
         temp_map = model.predict_from_params(params)
-    except FileNotFoundError:
-        T_eq = equilibrium_temperature(
-            star_teff_K, star_radius_solar, semi_major_axis_au,
-            albedo, bool(tidally_locked),
-        )
-        temp_map = generate_eyeball_map(T_eq, tidally_locked=bool(tidally_locked))
+        climate_method = "ELM Ensemble"
+    except Exception:
+        try:
+            from modules.pinnformer3d import (
+                load_pinnformer,
+                sample_cloud_map,
+                sample_surface_map,
+            )
+            pinn = load_pinnformer()
+            temp_map = sample_surface_map(pinn, T_eq, tidally_locked=locked)
+            cloud_map = sample_cloud_map(
+                pinn, n_lat=temp_map.shape[0], n_lon=temp_map.shape[1],
+            )
+            climate_method = "PINNFormer 3-D"
+        except Exception:
+            temp_map = generate_eyeball_map(T_eq, tidally_locked=locked)
+
+    hsf = habitable_surface_fraction(temp_map)
+
+    _update_agent_viz(
+        temperature_map=temp_map,
+        cloud_map=cloud_map,
+        climate_method=climate_method,
+        T_min=float(temp_map.min()),
+        T_max=float(temp_map.max()),
+        T_mean=float(temp_map.mean()),
+        hsf=hsf,
+        star_teff=star_teff_K,
+        star_radius=star_radius_solar,
+        semi_major=semi_major_axis_au,
+        planet_radius=radius_earth,
+        planet_mass=mass_earth,
+        albedo=albedo,
+        tidally_locked=locked,
+    )
 
     result = {
         "T_min_K": round(float(temp_map.min()), 1),
@@ -242,12 +444,14 @@ def run_climate_simulation(
         "T_std_K": round(float(temp_map.std()), 1),
         "map_shape": list(temp_map.shape),
         "has_liquid_water": bool(273 <= temp_map.mean() <= 373),
+        "HSF": round(hsf, 4),
+        "climate_method": climate_method,
     }
     return json.dumps(result, indent=2)
 
 
 @tool
-def consult_domain_expert(question: str, context: str = "") -> str:
+def consult_domain_expert(question: str, context: Any = "") -> str:
     """Ask the astrophysics domain-expert model for a scientific interpretation.
 
     Call this after computing habitability metrics or running a
@@ -255,9 +459,16 @@ def consult_domain_expert(question: str, context: str = "") -> str:
 
     Args:
         question: A scientific question to pose to the domain expert.
-        context: Optional JSON-encoded structured data (simulation
-            results, NASA data) to give the expert more context.
+        context: Optional supporting data (string or JSON) to give the
+            expert more context.  Can be a plain string or a dict/list
+            which will be serialised automatically.
     """
+    if not isinstance(context, str):
+        try:
+            context = json.dumps(context, indent=2, default=str)
+        except Exception:
+            context = str(context)
+
     llm = _get_domain_llm()
     latex_hint = (
         "Use LaTeX math notation for quantities and equations: "
@@ -459,11 +670,12 @@ def cite_scientific_literature(query: str, topics: str = "") -> str:
 
 tools = [
     query_nasa_archive,
+    search_planet_catalog,
     compute_habitability,
     run_climate_simulation,
-    classify_planet_radius_gap,       # NEW
-    predict_sulfur_chemistry,          # NEW
-    assess_carbon_oxygen_ratio,        # NEW
+    classify_planet_radius_gap,
+    predict_sulfur_chemistry,
+    assess_carbon_oxygen_ratio,
     consult_domain_expert,
     discover_most_habitable,
     compare_two_planets,
@@ -477,26 +689,48 @@ SYSTEM_PROMPT = """\
 You are AstroAgent — an autonomous assistant for exoplanet analysis.
 
 CAPABILITIES
-1. Retrieve planet data from the NASA Exoplanet Archive (query_nasa_archive)
-2. Compute habitability indices: T_eq, ESI, SEPHI, stellar flux (compute_habitability)
-3. Run an ELM climate surrogate for temperature-map prediction (run_climate_simulation)
-4. Consult an astrophysics domain expert for scientific interpretation (consult_domain_expert)
-5. Discover the most habitable planets in the archive (discover_most_habitable)
-6. Compare two planets side-by-side (compare_two_planets)
-7. Detect anomalous planets in the catalog (detect_anomalous_planets)
-8. Cite scientific literature to support claims (cite_scientific_literature)
-9. Classify a planet's radius relative to the Fulton Gap (classify_planet_radius_gap)
-10. Predict sulfur chemistry and surface mineralogy (predict_sulfur_chemistry)
-11. Assess planetary composition from the C/O ratio (assess_carbon_oxygen_ratio)
+1. Retrieve data for a SPECIFIC planet by name (query_nasa_archive)
+2. SEARCH the catalog by physical criteria — radius, mass, eccentricity, etc. (search_planet_catalog)
+3. Compute habitability indices: T_eq, ESI, SEPHI, stellar flux (compute_habitability)
+4. Run a climate surrogate for temperature-map prediction (run_climate_simulation)
+5. Consult an astrophysics domain expert for scientific interpretation (consult_domain_expert)
+6. Discover the most habitable planets in the archive (discover_most_habitable)
+7. Compare two planets side-by-side (compare_two_planets)
+8. Detect anomalous planets in the catalog (detect_anomalous_planets)
+9. Cite scientific literature to support claims (cite_scientific_literature)
+10. Classify a planet's radius relative to the Fulton Gap (classify_planet_radius_gap)
+11. Predict sulfur chemistry and surface mineralogy (predict_sulfur_chemistry)
+12. Assess planetary composition from the C/O ratio (assess_carbon_oxygen_ratio)
+
+VISUALIZATION
+When you call compute_habitability and run_climate_simulation, interactive
+visualisations are AUTOMATICALLY generated and displayed to the user below
+the conversation.  These include:
+- 3-D rotating globe / 2-D heatmap of surface temperature
+- ESI gauge, T_eq, HSF, and stellar-flux metrics dashboard
+- SEPHI traffic lights, ISA coupling, and false-positive badges
+- Composition panel (radius gap, sulfur chemistry, C/O ratio)
+- Habitable-zone diagram and terminator cross-section
+- CSV export of metrics and temperature map
+
+**Always call BOTH compute_habitability AND run_climate_simulation** when
+the user asks for a full analysis, evaluation, or visual output.  Pass
+the eccentricity parameter to compute_habitability when available.
+The classify_planet_radius_gap, predict_sulfur_chemistry, and
+assess_carbon_oxygen_ratio tools also update the dashboard.
 
 PROCEDURE
-1. When the user asks about a planet → first fetch data from NASA.
-2. From the data → compute habitability metrics.
-3. Consult the domain expert after computing habitability metrics
-   to provide expert interpretation alongside the raw numbers.
-4. If a climate simulation is requested or relevant → run it, then
-   consult the domain expert again to interpret the temperature map.
-5. Synthesise the domain expert's opinion with the numbers into a clear answer.
+1. If the user names a specific planet → query_nasa_archive(planet_name).
+   If the user wants to FIND/FILTER planets by criteria (radius, mass,
+   eccentricity, star type, etc.) → search_planet_catalog with the
+   appropriate parameter ranges, then pick the best candidate(s) and
+   call query_nasa_archive on each to get full data.
+2. From the data → compute habitability metrics (include eccentricity).
+3. Run a climate simulation to generate the temperature map and globe.
+4. Optionally call classify_planet_radius_gap, predict_sulfur_chemistry,
+   or assess_carbon_oxygen_ratio for deeper composition analysis.
+5. Consult the domain expert to interpret the combined results.
+6. Synthesise the domain expert's opinion with the numbers into a clear answer.
    Always present raw numeric results alongside any narrative.
 
 CITATION POLICY

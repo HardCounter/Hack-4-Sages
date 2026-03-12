@@ -169,6 +169,299 @@ _ICON_YES  = '<span style="color:#26a641">⬢</span>'  # U+2B22  — positive / 
 _ICON_NO   = '<span style="color:#e05252">⬡</span>'  # U+2B21  — negative / fail (red)
 _ICON_WARN = '<span style="color:#ff4b4b">⬢</span>'  # U+2B22  — warning (slider red)
 
+# ─── Agent AI visual dashboard renderer ──────────────────────────────────────
+
+def _render_agent_dashboard(viz: dict):
+    """Render the full visual dashboard for Agent AI results.
+
+    Mirrors the Manual Mode visualizations (ESI gauge, SEPHI, ISA/FP,
+    composition, 3-D globe, HZ diagram, terminator cross-section, CSV export)
+    using data accumulated by agent tools in *viz*.
+    """
+    analysis = viz.get("analysis")
+    temp_map = viz.get("temperature_map")
+    planet_name = viz.get("planet_name", "Analyzed Planet")
+
+    if not analysis and temp_map is None:
+        return
+
+    st.markdown("---")
+    st.markdown(f"### Visual Analysis: {planet_name}")
+
+    # ── Metrics section (from compute_habitability) ──────────────────────
+    if analysis:
+        T_eq = analysis.get("T_eq_K", 0)
+        esi_val = analysis.get("ESI", 0)
+        flux_val = analysis.get("flux_earth", 0)
+        sephi = analysis.get("SEPHI", {})
+        hsf = viz.get("hsf", 0)
+
+        gauge_col, metrics_col = st.columns([1, 1], gap="medium")
+
+        with gauge_col:
+            esi_gauge = go.Figure(
+                go.Indicator(
+                    mode="gauge+number",
+                    value=esi_val,
+                    gauge=dict(
+                        axis=dict(range=[0, 1]),
+                        bar=dict(color="#00d4ff"),
+                        steps=[
+                            dict(range=[0, 0.4], color="#d73027"),
+                            dict(range=[0.4, 0.7], color="#fee08b"),
+                            dict(range=[0.7, 1.0], color="#1a9850"),
+                        ],
+                        threshold=dict(
+                            line=dict(color="white", width=3),
+                            thickness=0.75,
+                            value=0.8,
+                        ),
+                    ),
+                    title=dict(text="Earth Similarity Index", font=dict(size=12)),
+                    number=dict(font=dict(size=28)),
+                )
+            )
+            esi_gauge.update_layout(
+                height=220,
+                margin=dict(l=20, r=20, t=40, b=10),
+                paper_bgcolor="rgba(0,0,0,0)",
+                font=dict(color="white"),
+            )
+            st.plotly_chart(esi_gauge, use_container_width=True, key="agent_esi_gauge")
+
+        with metrics_col:
+            esi_delta = esi_val - 0.8
+            esi_delta_str = f"{esi_delta:+.3f} vs 0.8 threshold"
+            esi_delta_color = "#26a641" if esi_delta >= 0 else "#e05252"
+            st.markdown(
+                f"""
+<div style="display:grid;grid-template-columns:1fr 1fr;grid-auto-rows:1fr;gap:.75rem;height:100%;align-content:center">
+  <div style="background:rgba(10,14,39,.7);border:1px solid rgba(66,165,245,.2);border-radius:12px;padding:.75rem 1rem;display:flex;flex-direction:column;justify-content:center">
+    <div style="color:#90a4ae;font-size:.8rem">Equilibrium Temp.</div>
+    <div style="color:#00d4ff;font-family:'Orbitron',sans-serif;font-size:1.5rem;font-weight:600">{T_eq:.0f} K</div>
+    <div style="font-size:.75rem;margin-top:.2rem;visibility:hidden">placeholder</div>
+  </div>
+  <div style="background:rgba(10,14,39,.7);border:1px solid rgba(66,165,245,.2);border-radius:12px;padding:.75rem 1rem;display:flex;flex-direction:column;justify-content:center">
+    <div style="color:#90a4ae;font-size:.8rem">Earth Similarity (ESI)</div>
+    <div style="color:#00d4ff;font-family:'Orbitron',sans-serif;font-size:1.5rem;font-weight:600">{esi_val:.3f}</div>
+    <div style="color:{esi_delta_color};font-size:.75rem;margin-top:.2rem">{'↑' if esi_delta >= 0 else '↓'} {esi_delta_str}</div>
+  </div>
+  <div style="background:rgba(10,14,39,.7);border:1px solid rgba(66,165,245,.2);border-radius:12px;padding:.75rem 1rem;display:flex;flex-direction:column;justify-content:center">
+    <div style="color:#90a4ae;font-size:.8rem">Habitable Surface</div>
+    <div style="color:#00d4ff;font-family:'Orbitron',sans-serif;font-size:1.5rem;font-weight:600">{hsf:.1%}</div>
+    <div style="font-size:.75rem;margin-top:.2rem;visibility:hidden">placeholder</div>
+  </div>
+  <div style="background:rgba(10,14,39,.7);border:1px solid rgba(66,165,245,.2);border-radius:12px;padding:.75rem 1rem;display:flex;flex-direction:column;justify-content:center">
+    <div style="color:#90a4ae;font-size:.8rem">Stellar Flux</div>
+    <div style="color:#00d4ff;font-family:'Orbitron',sans-serif;font-size:1.5rem;font-weight:600">{flux_val:.2f} S\u2295</div>
+    <div style="font-size:.75rem;margin-top:.2rem;visibility:hidden">placeholder</div>
+  </div>
+</div>""",
+                unsafe_allow_html=True,
+            )
+
+        # SEPHI traffic lights
+        if sephi and isinstance(sephi, dict):
+            with st.container(border=True):
+                st.markdown(
+                    f"**SEPHI** &nbsp; "
+                    f"{_ICON_YES if sephi.get('thermal_ok') else _ICON_NO} Thermal &nbsp; "
+                    f"{_ICON_YES if sephi.get('atmosphere_ok') else _ICON_NO} Atmosphere &nbsp; "
+                    f"{_ICON_YES if sephi.get('magnetic_ok') else _ICON_NO} Magnetic &nbsp; "
+                    f"(Score: **{sephi.get('sephi_score', 0):.2f}**)",
+                    unsafe_allow_html=True,
+                )
+
+        # ISA / False-Positive badges
+        isa = analysis.get("isa_interaction")
+        fp = analysis.get("biosignature_false_positives")
+        if isa or fp:
+            isa_col, fp_col = st.columns(2, gap="medium")
+            if isa:
+                with isa_col:
+                    isa_icon = (
+                        _ICON_YES if isa.get("isa_score", 0) >= 0.75 else
+                        _ICON_WARN if isa.get("isa_score", 0) >= 0.5 else
+                        _ICON_NO
+                    )
+                    st.markdown(
+                        f"**ISA Coupling** {isa_icon} "
+                        f"{isa.get('isa_assessment', '?')} "
+                        f"(score: {isa.get('isa_score', 0):.2f})",
+                        unsafe_allow_html=True,
+                    )
+            if fp:
+                with fp_col:
+                    fp_risk = fp.get("overall_false_positive_risk", "?")
+                    fp_icon = {
+                        "low": _ICON_YES, "moderate": _ICON_WARN, "high": _ICON_NO,
+                    }.get(fp_risk, "?")
+                    fp_label = fp_risk.title() if isinstance(fp_risk, str) else str(fp_risk)
+                    st.markdown(
+                        f"**False-Positive Risk** {fp_icon} {fp_label}",
+                        unsafe_allow_html=True,
+                    )
+
+        # Composition: Radius Gap / Sulfur / C/O
+        rg_d = viz.get("radius_gap")
+        sulfur_d = viz.get("sulfur")
+        co_d = viz.get("co")
+        if rg_d or sulfur_d or co_d:
+            with st.container(border=True):
+                st.markdown("##### Composition & Atmospheric Classification")
+                rg_col, sulfur_col, co_col = st.columns(3, gap="medium")
+                if rg_d:
+                    with rg_col:
+                        st.markdown(f"**Radius Class:** {rg_d.get('label', '?')}")
+                        st.caption(
+                            f"Atmosphere retention: `{rg_d.get('atmosphere_retention', '?')}`"
+                        )
+                        if rg_d.get("classification") == "radius_gap":
+                            st.progress(rg_d.get("gap_proximity", 0), text="Gap proximity")
+                if sulfur_d:
+                    with sulfur_col:
+                        st.markdown(
+                            f"**Sulfur:** `{sulfur_d.get('dominant_gas', '?')}` "
+                            f"| `{sulfur_d.get('regime', '?')}`"
+                        )
+                        st.caption(
+                            f"Surface minerals: "
+                            f"{', '.join(sulfur_d.get('surface_minerals', []))}"
+                        )
+                        if sulfur_d.get("h2so4_condensation"):
+                            st.warning("Venus-like H\u2082SO\u2084 clouds predicted")
+                if co_d:
+                    with co_col:
+                        adjusted_esi = esi_val + co_d.get("habitability_modifier", 0)
+                        st.markdown(f"**C/O:** {co_d.get('label', '?')}")
+                        st.caption(
+                            f"ESI adjusted: `{adjusted_esi:.3f}` "
+                            f"(modifier: {co_d.get('habitability_modifier', 0):+.3f})"
+                        )
+                        if co_d.get("classification") == "carbon_planet":
+                            st.error("Carbon-rich composition \u2014 liquid water unlikely")
+
+    # ── Temperature Map Visualization ────────────────────────────────────
+    if temp_map is not None:
+        _method = viz.get("climate_method", "Unknown")
+        _method_colors = {
+            "ELM Ensemble": "#1a9850",
+            "PINNFormer 3-D": "#6a3d9a",
+            "Analytical Fallback": "#d73027",
+        }
+        _mc = _method_colors.get(_method, "#90a4ae")
+        st.markdown(
+            f'<div style="display:inline-block;background:{_mc}22;border:1px solid {_mc};'
+            f'border-radius:8px;padding:4px 14px;font-size:.85rem;color:{_mc};'
+            f"font-family:'Space Grotesk',sans-serif;font-weight:600;margin-bottom:.5rem\">"
+            f"Climate map: {_method}</div>",
+            unsafe_allow_html=True,
+        )
+
+        from modules.visualization import create_2d_heatmap, create_3d_globe
+
+        cloud_map = viz.get("cloud_map")
+        view_mode = st.radio(
+            "View", ["3D Globe", "2D Heatmap"], horizontal=True, key="agent_view_mode",
+        )
+
+        overlay_options = []
+        if cloud_map is not None:
+            overlay_options.append("Clouds (PINN)")
+
+        selected_overlays: list[str] = []
+        if view_mode == "3D Globe" and overlay_options:
+            selected_overlays = st.multiselect(
+                "Overlays", overlay_options, default=overlay_options,
+                key="agent_overlays",
+            )
+
+        if view_mode == "3D Globe":
+            cloud_overlay = cloud_map if "Clouds (PINN)" in selected_overlays else None
+            fig = create_3d_globe(
+                temp_map, planet_name,
+                star_teff=viz.get("star_teff"),
+                cloud_map=cloud_overlay,
+            )
+        else:
+            fig = create_2d_heatmap(temp_map, planet_name)
+        st.plotly_chart(fig, use_container_width=True, key="agent_globe")
+
+        # Terminator cross-section
+        with st.container(border=True):
+            st.markdown("##### Terminator Cross-Section")
+            equator_idx = temp_map.shape[0] // 2
+            profile = temp_map[equator_idx, :]
+            lons = np.linspace(0, 360, len(profile))
+
+            fig_cs = go.Figure()
+            fig_cs.add_trace(
+                go.Scatter(x=lons, y=profile, mode="lines", name="Temperature")
+            )
+            fig_cs.add_hline(
+                y=273, line_dash="dash", line_color="#41ab5d",
+                annotation_text="273 K (freezing)",
+            )
+            fig_cs.add_hline(
+                y=373, line_dash="dash", line_color="#d73027",
+                annotation_text="373 K (boiling)",
+            )
+            fig_cs.update_layout(
+                xaxis_title="Longitude [\u00b0]",
+                yaxis_title="Temperature [K]",
+                paper_bgcolor="black",
+                plot_bgcolor="rgba(0,0,0,0)",
+                font=dict(color="white"),
+                height=_CHART_H,
+                margin=dict(l=40, r=20, t=30, b=40),
+            )
+            st.plotly_chart(fig_cs, use_container_width=True, key="agent_cross_section")
+
+    # ── HZ Diagram ───────────────────────────────────────────────────────
+    hz = viz.get("hz_boundaries")
+    if hz and viz.get("semi_major") and viz.get("star_teff"):
+        with st.container(border=True):
+            st.markdown("##### Habitable Zone")
+            from modules.visualization import create_hz_diagram
+            fig_hz = create_hz_diagram(hz, viz["semi_major"], viz["star_teff"])
+            st.plotly_chart(fig_hz, use_container_width=True, key="agent_hz_diagram")
+
+    # ── CSV Export ────────────────────────────────────────────────────────
+    if temp_map is not None and analysis:
+        with st.expander("Raw Data & CSV Export"):
+            _metrics_df = pd.DataFrame([{
+                "planet_name": planet_name,
+                "T_eq_K": analysis.get("T_eq_K", 0),
+                "T_min_K": viz.get("T_min", float(temp_map.min())),
+                "T_max_K": viz.get("T_max", float(temp_map.max())),
+                "T_mean_K": viz.get("T_mean", float(temp_map.mean())),
+                "ESI": analysis.get("ESI", 0),
+                "SEPHI_score": analysis.get("SEPHI", {}).get("sephi_score", 0)
+                if isinstance(analysis.get("SEPHI"), dict) else 0,
+                "HSF": viz.get("hsf", 0),
+                "flux_earth": analysis.get("flux_earth", 0),
+            }])
+            st.dataframe(_metrics_df, use_container_width=True)
+            st.download_button(
+                "Download metrics CSV",
+                data=_metrics_df.to_csv(index=False),
+                file_name=f"agent_{planet_name.replace(' ', '_')}_metrics.csv",
+                mime="text/csv",
+                key="agent_metrics_csv",
+            )
+            _tmap_df = pd.DataFrame(
+                temp_map,
+                columns=[f"lon_{i}" for i in range(temp_map.shape[1])],
+            )
+            st.download_button(
+                "Download temperature map CSV",
+                data=_tmap_df.to_csv(index=False),
+                file_name=f"agent_{planet_name.replace(' ', '_')}_tmap.csv",
+                mime="text/csv",
+                key="agent_tmap_csv",
+            )
+
+
 # ─── Cached loaders ──────────────────────────────────────────────────────────
 
 @st.cache_resource
@@ -273,6 +566,7 @@ with tab_agent:
                 st.markdown(sanitize_latex(msg["content"]))
 
         if prompt := st.chat_input("Ask about an exoplanet\u2026"):
+            st.session_state["_agent_viz"] = {}
             audience_hint = {
                 "Scientist": " (respond at expert level, cite equations)",
                 "Outreach": " (explain simply, use analogies and vivid language)",
@@ -365,6 +659,44 @@ with tab_agent:
                         st.markdown(f"**Output:** {sanitize_latex(obs[:500])}")
         else:
             st.info("Reasoning steps appear here after each agent response.")
+
+    # ── Agent Visual Dashboard (full-width, below chat + reasoning) ──────
+    _viz = st.session_state.get("_agent_viz", {})
+    if _viz.get("analysis") or _viz.get("temperature_map") is not None:
+        # Sync to global session state so Science tab also works
+        if _viz.get("temperature_map") is not None:
+            st.session_state.temperature_map = _viz["temperature_map"]
+            st.session_state.cloud_map = _viz.get("cloud_map")
+            st.session_state.ice_map = _viz.get("ice_map")
+            st.session_state.ocean_map = _viz.get("ocean_map")
+        if _viz.get("analysis"):
+            _a = _viz["analysis"]
+            _sephi = _a.get("SEPHI", {})
+            st.session_state.current_planet_data = {
+                "T_eq": _a.get("T_eq_K", 0),
+                "T_min": _viz.get("T_min", 0),
+                "T_max": _viz.get("T_max", 0),
+                "T_mean": _viz.get("T_mean", 0),
+                "ESI": _a.get("ESI", 0),
+                "SEPHI": _sephi,
+                "HSF": _viz.get("hsf", 0),
+                "flux_earth": _a.get("flux_earth", 0),
+                "star_teff": _viz.get("star_teff", 0),
+                "star_radius": _viz.get("star_radius", 0),
+                "planet_radius": _a.get("radius_earth", 1.0),
+                "planet_mass": _a.get("mass_earth", 1.0),
+                "semi_major": _viz.get("semi_major", 0),
+                "albedo": _viz.get("albedo", 0.3),
+                "eccentricity": _a.get("eccentricity", 0),
+                "tidally_locked": _viz.get("tidally_locked", True),
+                "climate_method": _viz.get("climate_method", "Unknown"),
+                "radius_gap": _viz.get("radius_gap"),
+                "sulfur": _viz.get("sulfur"),
+                "co": _viz.get("co"),
+            }
+            st.session_state["climate_method"] = _viz.get("climate_method", "Unknown")
+
+        _render_agent_dashboard(_viz)
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
