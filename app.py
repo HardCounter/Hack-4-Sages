@@ -143,7 +143,7 @@ hr{border-color:rgba(66,165,245,.15)!important;margin:var(--gap-lg) 0}
 
 _GLOSSARY = {
     "ESI": "Earth Similarity Index — scale 0-1 measuring similarity to Earth (1.0 = identical).",
-    "T_eq": "Equilibrium temperature — theoretical surface temperature assuming radiative balance [K].",
+    "T_eq": "Equilibrium temperature — theoretical surface temperature assuming radiative balance.",
     "Albedo": "Bond albedo — fraction of incident stellar radiation reflected by the planet (0-1).",
     "Tidal locking": "Synchronous rotation where one hemisphere permanently faces the star.",
     "HZ": "Habitable Zone — orbital region where liquid water can exist on the surface.",
@@ -211,9 +211,27 @@ for k, v in {
     "analysis_history": [],
     "selected_planet": None,
     "llm_mode": "dual_llm",
+    "temp_unit": "K",
 }.items():
     if k not in st.session_state:
         st.session_state[k] = v
+
+
+def _display_temp(val_k: float) -> float:
+    """Convert a Kelvin value to the currently selected display unit."""
+    if st.session_state["temp_unit"] == "°C":
+        return val_k - 273.15
+    return val_k
+
+
+def _tu() -> str:
+    """Return the active temperature-unit suffix, e.g. ``' K'`` or ``' °C'``."""
+    return " °C" if st.session_state["temp_unit"] == "°C" else " K"
+
+
+def _tu_bare() -> str:
+    """Return the bare unit label without leading space."""
+    return "°C" if st.session_state["temp_unit"] == "°C" else "K"
 
 # ─── Header with About button ─────────────────────────────────────────────
 
@@ -727,7 +745,7 @@ with tab_manual:
 <div style="display:grid;grid-template-columns:1fr 1fr;grid-auto-rows:1fr;gap:.75rem;height:100%;align-content:center">
   <div style="background:rgba(10,14,39,.7);border:1px solid rgba(66,165,245,.2);border-radius:12px;padding:.75rem 1rem;display:flex;flex-direction:column;justify-content:center">
     <div style="color:#90a4ae;font-size:.8rem">Equilibrium Temp.</div>
-    <div style="color:#00d4ff;font-family:'Orbitron',sans-serif;font-size:1.5rem;font-weight:600">{d['T_eq']:.0f} K</div>
+    <div style="color:#00d4ff;font-family:'Orbitron',sans-serif;font-size:1.5rem;font-weight:600">{_display_temp(d['T_eq']):.0f}{_tu()}</div>
     <div style="font-size:.75rem;margin-top:.2rem;visibility:hidden">placeholder</div>
   </div>
   <div style="background:rgba(10,14,39,.7);border:1px solid rgba(66,165,245,.2);border-radius:12px;padding:.75rem 1rem;display:flex;flex-direction:column;justify-content:center">
@@ -827,11 +845,12 @@ with tab_manual:
 
             # ── Raw Data Export ──
             with st.expander("Raw Data & CSV Export"):
+                _tu_col = _tu_bare()
                 _metrics_df = pd.DataFrame([{
-                    "T_eq_K": d["T_eq"],
-                    "T_min_K": d["T_min"],
-                    "T_max_K": d["T_max"],
-                    "T_mean_K": d["T_mean"],
+                    f"T_eq_{_tu_col}": _display_temp(d["T_eq"]),
+                    f"T_min_{_tu_col}": _display_temp(d["T_min"]),
+                    f"T_max_{_tu_col}": _display_temp(d["T_max"]),
+                    f"T_mean_{_tu_col}": _display_temp(d["T_mean"]),
                     "ESI": d["ESI"],
                     "SEPHI_score": d["SEPHI"]["sephi_score"],
                     "HSF": d["HSF"],
@@ -901,10 +920,12 @@ with tab_manual:
                     "Custom Planet",
                     star_teff=star_teff,
                     cloud_map=cloud_overlay,
+                    temp_unit=st.session_state["temp_unit"],
                 )
             else:
                 fig = create_2d_heatmap(
-                    st.session_state.temperature_map, "Custom Planet"
+                    st.session_state.temperature_map, "Custom Planet",
+                    temp_unit=st.session_state["temp_unit"],
                 )
             st.plotly_chart(fig, use_container_width=True)
 
@@ -1158,8 +1179,9 @@ with tab_catalog:
                 nice = {
                     "radius_earth": "Radius (R\u2295)", "mass_earth": "Mass (M\u2295)",
                     "semi_major_axis_au": "Semi-major axis (AU)",
-                    "insol_earth": "Insolation (S\u2295)", "t_eq_K": "T_eq (K)",
-                    "star_teff_K": "Star T_eff (K)",
+                    "insol_earth": "Insolation (S\u2295)",
+                    "t_eq_K": f"T_eq ({_tu_bare()})",
+                    "star_teff_K": f"Star T_eff ({_tu_bare()})",
                 }
 
                 from plotly.subplots import make_subplots
@@ -1346,7 +1368,10 @@ with tab_science:
                 try:
                     from modules.visualization import create_hz_diagram
                     if hz:
-                        fig_hz = create_hz_diagram(hz, d["semi_major"], d["star_teff"])
+                        fig_hz = create_hz_diagram(
+                            hz, d["semi_major"], d["star_teff"],
+                            temp_unit=st.session_state["temp_unit"],
+                        )
                         st.plotly_chart(fig_hz, use_container_width=True)
                     else:
                         st.warning("HZ boundaries could not be computed.")
@@ -1359,19 +1384,20 @@ with tab_science:
                 n_lat = tmap.shape[0]
                 equator_idx = n_lat // 2
                 profile = tmap[equator_idx, :]
+                profile_display = np.array([_display_temp(v) for v in profile])
                 lons = np.linspace(0, 360, len(profile))
 
                 fig_cs = go.Figure()
                 fig_cs.add_trace(
-                    go.Scatter(x=lons, y=profile, mode="lines", name="ELM / Analytical")
+                    go.Scatter(x=lons, y=profile_display, mode="lines", name="ELM / Analytical")
                 )
-                fig_cs.add_hline(y=273, line_dash="dash", line_color="#41ab5d",
-                                 annotation_text="273 K (freezing)")
-                fig_cs.add_hline(y=373, line_dash="dash", line_color="#d73027",
-                                 annotation_text="373 K (boiling)")
+                fig_cs.add_hline(y=_display_temp(273), line_dash="dash", line_color="#41ab5d",
+                                 annotation_text=f"{_display_temp(273):.0f}{_tu()} (freezing)")
+                fig_cs.add_hline(y=_display_temp(373), line_dash="dash", line_color="#d73027",
+                                 annotation_text=f"{_display_temp(373):.0f}{_tu()} (boiling)")
                 fig_cs.update_layout(
                     xaxis_title="Longitude [\u00b0]",
-                    yaxis_title="Temperature [K]",
+                    yaxis_title=f"Temperature [{_tu_bare()}]",
                     paper_bgcolor="black",
                     plot_bgcolor="rgba(0,0,0,0)",
                     font=dict(color="white"),
@@ -1405,10 +1431,10 @@ with tab_science:
                         "**Conformal prediction** (90% coverage interval from ELM ensemble):"
                     )
                     uc1, uc2, uc3, uc4 = st.columns(4)
-                    uc1.metric("T mean", f"{float(mean_map.mean()):.0f} K")
-                    uc2.metric("CI width (avg)", f"\u00b1{ci_width/2:.1f} K")
-                    uc3.metric("CI lower bound", f"{float(lower_map.mean()):.0f} K")
-                    uc4.metric("CI upper bound", f"{float(upper_map.mean()):.0f} K")
+                    uc1.metric("T mean", f"{_display_temp(float(mean_map.mean())):.0f}{_tu()}")
+                    uc2.metric("CI width (avg)", f"\u00b1{ci_width/2:.1f}{_tu()}")
+                    uc3.metric("CI lower bound", f"{_display_temp(float(lower_map.mean())):.0f}{_tu()}")
+                    uc4.metric("CI upper bound", f"{_display_temp(float(upper_map.mean())):.0f}{_tu()}")
                     _elm_ci_shown = True
             except Exception:
                 pass
@@ -1417,7 +1443,7 @@ with tab_science:
                     "Analytical model: static uncertainty estimates (ELM not loaded)."
                 )
                 uncert_cols = st.columns(3)
-                uncert_cols[0].metric("T_eq \u00b1", "\u00b115 K (albedo uncertainty)")
+                uncert_cols[0].metric("T_eq \u00b1", f"\u00b115{_tu()} (albedo uncertainty)")
                 uncert_cols[1].metric("ESI \u00b1", "\u00b10.05 (propagated)")
                 uncert_cols[2].metric("HSF \u00b1", "\u00b15 pp")
 
@@ -1460,12 +1486,13 @@ with tab_science:
 
                         mc1, mc2, mc3, mc4 = st.columns(4)
                         mc1.metric("Pattern correlation", f"{metrics['pattern_correlation']:.3f}")
-                        mc2.metric("RMSE", f"{metrics['rmse_K']:.1f} K")
-                        mc3.metric("Bias", f"{metrics['bias_K']:+.1f} K")
-                        mc4.metric("Zonal RMSE", f"{metrics['zonal_mean_rmse_K']:.1f} K")
+                        mc2.metric("RMSE", f"{metrics['rmse_K']:.1f}{_tu()}")
+                        mc3.metric("Bias", f"{metrics['bias_K']:+.1f}{_tu()}")
+                        mc4.metric("Zonal RMSE", f"{metrics['zonal_mean_rmse_K']:.1f}{_tu()}")
 
-                        surr_zonal = compute_zonal_mean(surr_map)
-                        gcm_zonal = compute_zonal_mean(gcm_map)
+                        _t_off = -273.15 if st.session_state["temp_unit"] == "°C" else 0.0
+                        surr_zonal = compute_zonal_mean(surr_map) + _t_off
+                        gcm_zonal = compute_zonal_mean(gcm_map) + _t_off
                         lats = np.linspace(-90, 90, len(surr_zonal))
 
                         fig_zonal = go.Figure()
@@ -1480,7 +1507,7 @@ with tab_science:
                         ))
                         fig_zonal.update_layout(
                             xaxis_title="Latitude [deg]",
-                            yaxis_title="Zonal mean T [K]",
+                            yaxis_title=f"Zonal mean T [{_tu_bare()}]",
                             paper_bgcolor="black",
                             plot_bgcolor="rgba(0,0,0,0)",
                             font=dict(color="white"),
@@ -1599,6 +1626,25 @@ with tab_system:
         }
         st.caption(_mode_desc[st.session_state["llm_mode"]])
 
+    # ── Temperature Unit Selector ──
+    with st.container(border=True):
+        st.markdown("##### Temperature Display Unit")
+        _unit_choice = st.radio(
+            "Select temperature unit",
+            ["K", "°C"],
+            index=0 if st.session_state["temp_unit"] == "K" else 1,
+            horizontal=True,
+            help="Switch between Kelvin and Celsius for all temperature displays.",
+        )
+        if _unit_choice != st.session_state["temp_unit"]:
+            st.session_state["temp_unit"] = _unit_choice
+            st.rerun()
+        st.caption(
+            "Kelvin (K) — standard astrophysical unit."
+            if st.session_state["temp_unit"] == "K"
+            else "Celsius (°C) — offset from Kelvin by −273.15."
+        )
+
     if st.button("Run Self-Diagnostics"):
         checks = {}
 
@@ -1618,7 +1664,8 @@ with tab_system:
                 from modules.astro_physics import equilibrium_temperature
                 t_earth = equilibrium_temperature(5778, 1.0, 1.0, 0.3, False)
                 checks["T_eq(Earth)"] = (
-                    f"{_ICON_YES} {t_earth:.1f} K" if 240 < t_earth < 270 else f"{_ICON_WARN} {t_earth:.1f} K"
+                    f"{_ICON_YES} {_display_temp(t_earth):.1f}{_tu()}" if 240 < t_earth < 270
+                    else f"{_ICON_WARN} {_display_temp(t_earth):.1f}{_tu()}"
                 )
             except Exception as exc:
                 checks["T_eq(Earth)"] = f"{_ICON_NO} {exc}"
@@ -1680,7 +1727,10 @@ with tab_system:
     if st.session_state.temperature_map is not None:
         from modules.visualization import create_3d_globe
 
-        fig_export = create_3d_globe(st.session_state.temperature_map, "Export")
+        fig_export = create_3d_globe(
+            st.session_state.temperature_map, "Export",
+            temp_unit=st.session_state["temp_unit"],
+        )
         html_bytes = fig_export.to_html(include_plotlyjs="cdn").encode()
         with st.container(border=True):
             st.download_button(
