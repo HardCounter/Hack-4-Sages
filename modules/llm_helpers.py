@@ -249,12 +249,47 @@ def compare_planets(planet_a: Dict, planet_b: Dict) -> str:
 
 # ─── Orchestrator helpers (Qwen 2.5) ─────────────────────────────────────────
 
+def _looks_like_planet_name(text: str) -> bool:
+    """Heuristic: does *text* look like a specific planet name rather than a descriptive query?"""
+    text = text.strip()
+    _PLANET_PREFIXES = (
+        "TRAPPIST", "Proxima", "Kepler", "TOI-", "K2-", "LHS", "GJ",
+        "HD ", "HR ", "WASP", "HAT-P", "CoRoT", "55 Cnc", "Wolf",
+        "Ross", "Tau Cet", "Gliese",
+    )
+    if any(text.upper().startswith(p.upper()) for p in _PLANET_PREFIXES):
+        return True
+    if re.match(r"^[A-Z0-9][\w\s.\-]+[bcdefgh]$", text.strip(), re.IGNORECASE):
+        return True
+    return False
+
+
+def generate_planet_name_query(name: str) -> str:
+    """Build a direct ADQL query to find a planet by name (no LLM needed).
+
+    Uses UPPER() for case-insensitive matching and trims whitespace.
+    """
+    safe_name = name.strip().replace("'", "''").upper()
+    return (
+        "SELECT pl_name, pl_radj, pl_bmassj, pl_orbsmax, pl_orbper, "
+        "pl_insol, pl_eqt, pl_dens, st_teff, st_rad, st_lum, st_mass, "
+        "sy_dist, disc_year, discoverymethod "
+        f"FROM pscomppars WHERE UPPER(pl_name) LIKE '%{safe_name}%'"
+    )
+
+
 def generate_adql_query(natural_language: str) -> str:
     """Convert a natural-language question into an ADQL query.
 
     The query targets the ``pscomppars`` table in the NASA Exoplanet
     Archive.  Used in the Catalog tab's search bar.
+
+    If the input looks like a planet name, a direct name-match query
+    is returned without invoking the LLM.
     """
+    if _looks_like_planet_name(natural_language):
+        return generate_planet_name_query(natural_language)
+
     prompt = (
         "You are an expert in ADQL (Astronomical Data Query Language). "
         "Convert the following natural-language question into a valid "
@@ -264,10 +299,27 @@ def generate_adql_query(natural_language: str) -> str:
         "pl_insol (S_Earth), pl_eqt (K), pl_dens (g/cm3), "
         "st_teff (K), st_rad (R_sun), st_lum (log L_sun), st_mass (M_sun), "
         "sy_dist (pc), disc_year, discoverymethod.\n\n"
-        "Return ONLY the SQL query, no explanation.\n\n"
-        f"Question: {natural_language}"
+        "IMPORTANT RULES:\n"
+        "- To search by planet name use: WHERE pl_name LIKE '%<name>%'\n"
+        "- pl_radj is in Jupiter radii, pl_bmassj is in Jupiter masses\n"
+        "- Always include pl_name in the SELECT\n"
+        "- Return ONLY the SQL query, no explanation or markdown\n\n"
+        "Examples:\n"
+        "Q: rocky planets closer than 10 parsecs\n"
+        "A: SELECT pl_name, pl_radj, pl_bmassj, pl_orbsmax, st_teff, sy_dist "
+        "FROM pscomppars WHERE pl_radj < 0.15 AND sy_dist < 10 "
+        "AND pl_radj IS NOT NULL AND sy_dist IS NOT NULL\n\n"
+        "Q: planets discovered by transit after 2020\n"
+        "A: SELECT pl_name, pl_radj, disc_year, discoverymethod "
+        "FROM pscomppars WHERE discoverymethod = 'Transit' "
+        "AND disc_year > 2020\n\n"
+        f"Q: {natural_language}\nA: "
     )
-    return _safe(_ask_orchestrator, prompt, fallback="")
+    raw = _safe(_ask_orchestrator, prompt, fallback="")
+    clean = raw.strip().strip("`").strip()
+    if clean.lower().startswith("sql"):
+        clean = clean[3:].strip()
+    return clean
 
 
 def generate_smart_suggestions(conversation_summary: str) -> list:

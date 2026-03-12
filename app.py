@@ -962,30 +962,46 @@ with tab_manual:
 with tab_catalog:
     st.subheader("Habitable-Zone Candidates — NASA Exoplanet Archive")
 
-    # ── Natural-language ADQL query (Qwen orchestrator) ───────────
+    # ── Search: try direct name lookup first, then LLM-generated ADQL ──
     nl_query = st.text_input(
-        "Search planets in natural language",
-        placeholder="e.g. rocky planets closer than 10 parsecs",
+        "Search planets (name or natural language)",
+        placeholder="e.g. TRAPPIST-1 e, or rocky planets closer than 10 parsecs",
     )
     if nl_query:
-        try:
-            from modules.llm_helpers import generate_adql_query
-            with st.spinner("Qwen translating to ADQL..."):
-                adql = generate_adql_query(nl_query)
-            if adql:
-                st.code(adql, language="sql")
-                with st.spinner("Executing query..."):
-                    from modules.nasa_client import query_nasa_archive
-                    nl_results = query_nasa_archive(adql)
-                if nl_results is not None and not nl_results.empty:
-                    st.dataframe(nl_results, use_container_width=True)
-                    st.success(f"Found {len(nl_results)} results")
-                else:
-                    st.warning("Query returned no results.")
-            else:
-                st.warning("Could not generate ADQL query.")
-        except Exception as exc:
-            st.error(f"ADQL search error: {exc}")
+        from modules.llm_helpers import generate_adql_query, generate_planet_name_query
+        from modules.nasa_client import query_nasa_archive
+
+        nl_results = None
+
+        # Always try a case-insensitive name search first
+        with st.spinner("Searching by name\u2026"):
+            try:
+                name_adql = generate_planet_name_query(nl_query)
+                nl_results = query_nasa_archive(name_adql)
+                if nl_results is not None and nl_results.empty:
+                    nl_results = None
+            except Exception:
+                nl_results = None
+
+        # If no name match, fall back to LLM-generated ADQL
+        if nl_results is None:
+            try:
+                with st.spinner("Translating to ADQL\u2026"):
+                    adql = generate_adql_query(nl_query)
+                if adql:
+                    st.code(adql, language="sql")
+                    with st.spinner("Executing query\u2026"):
+                        nl_results = query_nasa_archive(adql)
+                    if nl_results is not None and nl_results.empty:
+                        nl_results = None
+            except Exception as exc:
+                st.error(f"ADQL search error: {exc}")
+
+        if nl_results is not None:
+            st.dataframe(nl_results, use_container_width=True)
+            st.success(f"Found {len(nl_results)} results")
+        else:
+            st.warning("No results found.")
 
     st.markdown("##### Example Systems")
     st.caption("Pre-loaded queries that trigger real NASA TAP lookups and the full computation pipeline.")
@@ -1032,13 +1048,15 @@ with tab_catalog:
                 st.error(str(exc))
         st.session_state["selected_planet"] = None
 
-    if st.button("Fetch full NASA catalog"):
-        with st.spinner("Querying NASA Exoplanet Archive\u2026"):
+    if st.button("Fetch full catalog (NASA + European sources)"):
+        with st.spinner("Querying NASA, Exoplanet.eu, DACE\u2026"):
             try:
-                from modules.nasa_client import get_habitable_candidates
-                cand = get_habitable_candidates()
+                from modules.combined_catalog import build_combined_catalog
+                cand = build_combined_catalog()
                 st.dataframe(cand, use_container_width=True)
-                st.success(f"Found {len(cand)} candidates")
+                sources = cand["source"].value_counts().to_dict() if "source" in cand.columns else {}
+                src_summary = " \u00b7 ".join(f"{s}: **{n}**" for s, n in sources.items())
+                st.success(f"Found {len(cand)} planets ({src_summary})")
 
                 # ── Anomaly detection + UMAP + Weird Planets ──
                 try:
