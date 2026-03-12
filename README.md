@@ -44,7 +44,7 @@ A real-time, browser-based climate-surrogate explorer for exoplanets, inspired b
 
 - **Query NASA** — pull real observational data for any confirmed exoplanet via the TAP protocol.
 - **Multi-archive catalog** — combined catalog integrating NASA Exoplanet Archive, Exoplanet.eu, DACE (Geneva/CHEOPS), and Gaia DR3 into a unified, de-duplicated dataset.
-- **Compute habitability** — equilibrium temperature, Earth Similarity Index (ESI), SEPHI, habitable-zone boundaries (Kopparapu 2013), habitable surface fraction.
+- **Compute habitability** — equilibrium temperature, Earth Similarity Index (ESI), Surface Exoplanetary Habitability Index (SEPHI, Rodríguez-Mozos & Moya 2017), habitable-zone boundaries (Kopparapu 2013), habitable surface fraction.
 - **ISA interaction modeling** — Interior-Surface-Atmosphere coupling assessment including volcanic outgassing, plate tectonics likelihood, and carbonate-silicate cycle.
 - **Biosignature false-positive mitigation** — UV flux estimation and photochemical false-positive risk analysis to distinguish biological from abiotic signatures.
 - **Predict climates** — an ensemble of Extreme Learning Machines (ELM) predicts 2-D surface temperature maps in milliseconds with conformal prediction uncertainty intervals.
@@ -128,7 +128,7 @@ The system uses **two LLM models** served via Ollama:
 | Model | Role | Base | VRAM |
 |-------|------|------|------|
 | `qwen2.5:14b` | Orchestrator — tool calling, routing, synthesis | Qwen 2.5-14B | ~9 GB |
-| `astrosage` | Domain expert — interpretation, classification, scientific narratives | [AstroSage-Llama-3.1-8B](https://huggingface.co/AstroMLab/AstroSage-Llama-3.1-8B-GGUF) (Q5_K_M GGUF) | ~5 GB |
+| `astro-agent` | Domain expert — interpretation, classification, scientific narratives | [AstroSage-Llama-3.1-8B](https://huggingface.co/AstroMLab/AstroSage-Llama-3.1-8B-GGUF) (Q5_K_M GGUF) | ~5 GB |
 
 ```bash
 # Pull the orchestrator model (~9 GB)
@@ -136,7 +136,7 @@ ollama pull qwen2.5:14b
 
 # Create the AstroSage domain-expert model from the included Modelfile
 # This downloads the AstroMLab/AstroSage-Llama-3.1-8B-GGUF weights automatically
-ollama create astrosage -f Modelfile.astrosage
+ollama create astro-agent -f Modelfile.astrosage
 
 # Verify both models are available
 ollama list
@@ -146,7 +146,7 @@ ollama list
 
 Ollama automatically starts a local API server on `http://localhost:11434`. On NVIDIA GPUs it uses the CUDA backend by default.
 
-> **Note:** `Modelfile.astro` is a legacy file that creates a Qwen 2.5-based model with a system prompt. It is **not** used by the current codebase. The code expects `qwen2.5:14b` (raw) and `astrosage` (from `Modelfile.astrosage`).
+> **Note:** `Modelfile.astro` is a legacy file that creates a Qwen 2.5-based model with a system prompt. It is **not** used by the current codebase. The code expects `qwen2.5:14b` (raw) and `astro-agent` (from `Modelfile.astrosage`).
 
 ### 4. Train the models
 
