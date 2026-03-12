@@ -171,7 +171,15 @@ def train_ctgan(epochs: int = 1000):
 
 # ── 3. PINNFormer 3-D ────────────────────────────────────────────────────────
 
-def train_pinn(epochs: int = 5000, n_colloc: int = 8192, mode: str = "basic"):
+def train_pinn(
+    epochs: int = 30_000,
+    n_colloc: int = 16_384,
+    mode: str = "basic",
+    resample_every: int = 2_000,
+    warmup_epochs: int = 500,
+    validate_every: int = 2_000,
+    checkpoint: bool = True,
+):
     from modules.pinnformer3d import (
         PINNPhysicsConfig,
         train_pinnformer,
@@ -198,6 +206,15 @@ def train_pinn(epochs: int = 5000, n_colloc: int = 8192, mode: str = "basic"):
         print(f"  VRAM   : {vram:.1f} GB")
     print(f"  Collocation points: {n_colloc}")
     print(f"  Epochs: {epochs}")
+    if resample_every > 0:
+        print(f"  Resample collocation every: {resample_every} epochs")
+    if warmup_epochs > 0:
+        print(f"  LR warmup: {warmup_epochs} epochs")
+    if validate_every > 0:
+        print(f"  Validation every: {validate_every} epochs")
+
+    checkpoint_dir = os.path.join(MODELS_DIR, "checkpoints") if checkpoint else None
+    log_every = max(500, epochs // 100)
 
     t0 = time.time()
     model, history = train_pinnformer(
@@ -205,7 +222,11 @@ def train_pinn(epochs: int = 5000, n_colloc: int = 8192, mode: str = "basic"):
         n_colloc=n_colloc,
         epochs=epochs,
         device=device,
-        log_every=500,
+        log_every=log_every,
+        resample_every=resample_every,
+        warmup_epochs=warmup_epochs,
+        checkpoint_dir=checkpoint_dir,
+        validate_every=validate_every,
     )
     elapsed = time.time() - t0
     print(f"  Training completed in {elapsed/60:.1f} min")
@@ -249,8 +270,8 @@ def main():
         help="CTGAN training epochs (default: 600)"
     )
     parser.add_argument(
-        "--pinn-epochs", type=int, default=5000,
-        help="PINNFormer training epochs (default: 5000)"
+        "--pinn-epochs", type=int, default=10_000,
+        help="PINNFormer training epochs (default: 10000)"
     )
     parser.add_argument(
         "--pinn-mode", type=str, default="basic",
@@ -265,8 +286,20 @@ def main():
         ),
     )
     parser.add_argument(
-        "--pinn-colloc", type=int, default=8192,
-        help="Number of collocation points for PINN training (default: 8192)"
+        "--pinn-colloc", type=int, default=16_384,
+        help="Number of collocation points for PINN training (default: 16384)"
+    )
+    parser.add_argument(
+        "--pinn-resample", type=int, default=2_000,
+        help="Re-draw collocation points every N epochs (0 = static; default: 2000)"
+    )
+    parser.add_argument(
+        "--pinn-warmup", type=int, default=500,
+        help="Linear LR warmup epochs before cosine annealing (default: 500)"
+    )
+    parser.add_argument(
+        "--pinn-validate-every", type=int, default=2_000,
+        help="Run validation every N epochs and track best model (default: 2000)"
     )
     args = parser.parse_args()
 
@@ -287,6 +320,10 @@ def main():
             epochs=args.pinn_epochs,
             n_colloc=args.pinn_colloc,
             mode=args.pinn_mode,
+            resample_every=args.pinn_resample,
+            warmup_epochs=args.pinn_warmup,
+            validate_every=args.pinn_validate_every,
+            checkpoint=True,
         )
 
     print(f"\n{'='*60}")
