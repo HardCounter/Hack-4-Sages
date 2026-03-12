@@ -990,7 +990,7 @@ Hack-4-Sages/
 ├── train_models.py                 # CLI for training ELM, CTGAN, PINNFormer (~306 lines)
 ├── requirements.txt                # Python dependencies (23 packages)
 ├── Dockerfile                      # Container build (python:3.11-slim)
-├── Modelfile.astro                 # Ollama custom model — Qwen 2.5-14B orchestrator
+├── Modelfile.astro                 # Ollama custom model — Qwen 2.5-14B orchestrator (legacy)
 ├── Modelfile.astrosage             # Ollama custom model — AstroSage-Llama-3.1-8B domain expert
 ├── README.md                       # Project documentation
 ├── METHODOLOGY.md                  # Scientific methodology & formulas

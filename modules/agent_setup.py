@@ -3,7 +3,7 @@ LangChain agent orchestration — configurable single/dual-model setup.
 
 Runtime modes
 -------------
-* ``AgentMode.DUAL_LLM``   : Qwen 2.5-14B orchestrator + astro-agent domain expert (default).
+* ``AgentMode.DUAL_LLM``   : Qwen 2.5-14B orchestrator + AstroSage domain expert (default).
 * ``AgentMode.SINGLE_LLM`` : astro-agent handles both orchestration and interpretation.
 * ``AgentMode.DETERMINISTIC``: No LLM — deterministic tools only (physics + ML).
 
