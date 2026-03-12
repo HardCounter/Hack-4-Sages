@@ -166,6 +166,13 @@ class TrainingHistory:
     lr: List[float] = field(default_factory=list)
     validation: Dict[str, float] = field(default_factory=dict)
 
+    val_epoch: List[int] = field(default_factory=list)
+    val_pde_rmse: List[float] = field(default_factory=list)
+    val_T_min: List[float] = field(default_factory=list)
+    val_T_max: List[float] = field(default_factory=list)
+    train_val_gap: List[float] = field(default_factory=list)
+    early_stopped_at: Optional[int] = None
+
 
 # ── Model architecture ───────────────────────────────────────────────────────
 
@@ -400,6 +407,7 @@ if _HAS_TORCH:
         warmup_epochs: int = 0,
         checkpoint_dir: Optional[str] = None,
         validate_every: int = 0,
+        early_stopping_patience: int = 0,
     ) -> Tuple[PINNFormer3D, TrainingHistory]:
         """Train a PINNFormer3D and return ``(model, history)``.
 
@@ -427,6 +435,10 @@ if _HAS_TORCH:
         validate_every : int
             Run PDE-residual validation every N epochs and track the best
             model (0 = validate only at end).
+        early_stopping_patience : int
+            Stop training if the validation PDE RMSE does not improve for
+            this many consecutive validation checks (0 = disabled).
+            Requires ``validate_every > 0``.
         """
         import time as _time
 
@@ -504,6 +516,7 @@ if _HAS_TORCH:
         history = TrainingHistory()
         best_val_rmse = float("inf")
         best_state: Optional[Dict[str, torch.Tensor]] = None
+        patience_counter = 0
         t_start = _time.time()
 
         for epoch in range(1, epochs + 1):
@@ -565,15 +578,28 @@ if _HAS_TORCH:
                         "looks divergent — consider lowering lr or grad_clip."
                     )
 
-            # Periodic validation with best-model tracking
+            # Periodic validation with best-model tracking and overfit detection
             if validate_every > 0 and epoch % validate_every == 0:
                 val_stats = _compute_validation_stats(
                     model, cfg=cfg, device=device, lambda_pde=lambda_pde,
                 )
                 val_rmse = val_stats["pde_residual_rmse"]
+
+                # Train-vs-validation gap: sqrt(training PDE loss) approximates
+                # the training residual RMSE on the current collocation batch.
+                train_rmse = float(l_pde.detach().sqrt())
+                gap = val_rmse - train_rmse
+
+                history.val_epoch.append(epoch)
+                history.val_pde_rmse.append(val_rmse)
+                history.val_T_min.append(val_stats["T_min"])
+                history.val_T_max.append(val_stats["T_max"])
+                history.train_val_gap.append(gap)
+
                 improved = val_rmse < best_val_rmse
                 if improved:
                     best_val_rmse = val_rmse
+                    patience_counter = 0
                     best_state = {
                         k: v.clone() for k, v in model.state_dict().items()
                     }
@@ -583,20 +609,45 @@ if _HAS_TORCH:
                             os.path.join(checkpoint_dir, "best.pt"),
                             cfg=cfg,
                         )
+                else:
+                    patience_counter += 1
+
                 if verbose:
                     tag = " *BEST*" if improved else ""
+                    gap_warn = ""
+                    if gap > 0 and len(history.train_val_gap) >= 3:
+                        recent = history.train_val_gap[-3:]
+                        if all(g > 0 for g in recent):
+                            gap_warn = "  [OVERFIT?]"
                     print(
                         f"  [VAL ep {epoch}] "
                         f"PDE RMSE={val_rmse:.4e}  "
+                        f"train={train_rmse:.4e}  "
+                        f"gap={gap:+.4e}  "
                         f"T=[{val_stats['T_min']:.1f},{val_stats['T_max']:.1f}]"
-                        f"{tag}"
+                        f"{tag}{gap_warn}"
                     )
+
                 if checkpoint_dir:
                     save_pinnformer(
                         model,
                         os.path.join(checkpoint_dir, "latest.pt"),
                         cfg=cfg,
                     )
+
+                if (
+                    early_stopping_patience > 0
+                    and patience_counter >= early_stopping_patience
+                ):
+                    if verbose:
+                        print(
+                            f"\n  [EARLY STOP] No improvement for "
+                            f"{patience_counter} validation checks "
+                            f"({patience_counter * validate_every} epochs). "
+                            f"Best val PDE RMSE={best_val_rmse:.4e}"
+                        )
+                    history.early_stopped_at = epoch
+                    break
 
         # Restore best model if we tracked validation
         if best_state is not None:
