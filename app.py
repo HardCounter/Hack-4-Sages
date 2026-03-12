@@ -560,125 +560,112 @@ tab_agent, tab_manual, tab_catalog, tab_science, tab_system, tab_about = st.tabs
 # ═══════════════════════════════════════════════════════════════════════════════
 
 with tab_agent:
-    col_chat, col_reasoning = st.columns([3, 1])
+    st.subheader("Conversation with AstroAgent")
 
-    with col_chat:
-        st.subheader("Conversation with AstroAgent")
-
-        if st.session_state["llm_mode"] == "deterministic":
-            st.warning(
-                "Running in **Deterministic Tools Only** mode — "
-                "no LLM agent available. Switch to Single-LLM or "
-                "Dual-LLM mode in the System tab to enable the agent."
-            )
-
-        audience = st.radio(
-            "Explanation depth",
-            ["Scientist", "Outreach"],
-            horizontal=True,
-            index=0,
+    if st.session_state["llm_mode"] == "deterministic":
+        st.warning(
+            "Running in **Deterministic Tools Only** mode — "
+            "no LLM agent available. Switch to Single-LLM or "
+            "Dual-LLM mode in the System tab to enable the agent."
         )
 
-        for msg in st.session_state.chat_history:
-            with st.chat_message(msg["role"]):
-                st.markdown(sanitize_latex(msg["content"]))
+    audience = st.radio(
+        "Explanation depth",
+        ["Scientist", "Outreach"],
+        horizontal=True,
+        index=0,
+    )
 
-        if prompt := st.chat_input("Ask about an exoplanet\u2026"):
-            st.session_state["_agent_viz"] = {}
-            audience_hint = {
-                "Scientist": " (respond at expert level, cite equations)",
-                "Outreach": " (explain simply, use analogies and vivid language)",
-            }
-            full_prompt = prompt + audience_hint.get(audience, "")
+    for msg in st.session_state.chat_history:
+        with st.chat_message(msg["role"]):
+            st.markdown(sanitize_latex(msg["content"]))
 
-            st.session_state.chat_history.append({"role": "user", "content": prompt})
-            with st.chat_message("user"):
-                st.markdown(prompt)
+    if prompt := st.chat_input("Ask about an exoplanet\u2026"):
+        st.session_state["_agent_viz"] = {}
+        audience_hint = {
+            "Scientist": " (respond at expert level, cite equations)",
+            "Outreach": " (explain simply, use analogies and vivid language)",
+        }
+        full_prompt = prompt + audience_hint.get(audience, "")
 
-            with st.chat_message("assistant"):
-                with st.spinner("Agent reasoning\u2026"):
-                    try:
-                        from langchain_core.messages import AIMessage, HumanMessage
-                        lc_history = []
-                        for m in st.session_state.chat_history[:-1]:
-                            cls = HumanMessage if m["role"] == "user" else AIMessage
-                            lc_history.append(cls(content=m["content"]))
+        st.session_state.chat_history.append({"role": "user", "content": prompt})
+        with st.chat_message("user"):
+            st.markdown(prompt)
 
-                        agent = _load_agent(st.session_state["llm_mode"])
-                        if agent is None:
-                            answer = ("Agent unavailable in Deterministic mode. "
-                                      "Switch to Single-LLM or Dual-LLM in the System tab.")
-                            steps = []
-                        else:
-                            response = agent.invoke(
-                                {"input": full_prompt, "chat_history": lc_history}
-                            )
-                            answer = response["output"]
-                            steps = response.get("intermediate_steps", [])
-                    except Exception as exc:
-                        answer = f"Agent unavailable: {exc}"
-                        steps = []
-                    st.markdown(sanitize_latex(answer))
+        with st.chat_message("assistant"):
+            msg_placeholder = st.empty()
 
-            st.session_state.chat_history.append({"role": "assistant", "content": answer})
-            st.session_state["_last_agent_steps"] = steps
+        try:
+            from langchain_core.messages import AIMessage, HumanMessage
+            lc_history = []
+            for m in st.session_state.chat_history[:-1]:
+                cls = HumanMessage if m["role"] == "user" else AIMessage
+                lc_history.append(cls(content=m["content"]))
 
-            # Proactive suggestions (LLM-generated via Qwen, or static fallback)
-            st.markdown("---")
-            st.markdown("**Suggested next steps:**")
-            if st.session_state["llm_mode"] != "deterministic":
-                try:
-                    from modules.llm_helpers import generate_smart_suggestions
-                    convo_summary = "\n".join(
-                        f"{m['role']}: {m['content'][:200]}"
-                        for m in st.session_state.chat_history[-6:]
-                    )
-                    suggestions = generate_smart_suggestions(convo_summary)
-                except Exception:
-                    suggestions = [
-                        "Run a climate simulation for this planet",
-                        "Compare with Earth",
-                        "Find similar planets in the catalog",
-                    ]
+            agent = _load_agent(st.session_state["llm_mode"])
+            if agent is None:
+                answer = (
+                    "Agent unavailable in Deterministic mode. "
+                    "Switch to Single-LLM or Dual-LLM in the System tab."
+                )
+                msg_placeholder.markdown(sanitize_latex(answer))
             else:
+                answer = ""
+                # Progressive text display when streaming is supported
+                try:
+                    for chunk in agent.stream(
+                        {"input": full_prompt, "chat_history": lc_history},
+                    ):
+                        if isinstance(chunk, dict) and chunk.get("output"):
+                            answer = chunk["output"]
+                            msg_placeholder.markdown(sanitize_latex(answer))
+                except Exception:
+                    # Streaming may not be supported; fall back to single-shot invoke
+                    pass
+
+                if not answer:
+                    response = agent.invoke(
+                        {"input": full_prompt, "chat_history": lc_history}
+                    )
+                    answer = response["output"]
+                    msg_placeholder.markdown(sanitize_latex(answer))
+        except Exception as exc:
+            answer = f"Agent unavailable: {exc}"
+            msg_placeholder.markdown(sanitize_latex(answer))
+
+        st.session_state.chat_history.append({"role": "assistant", "content": answer})
+
+        # Proactive suggestions (LLM-generated via Qwen, or static fallback)
+        st.markdown("---")
+        st.markdown("**Suggested next steps:**")
+        if st.session_state["llm_mode"] != "deterministic":
+            try:
+                from modules.llm_helpers import generate_smart_suggestions
+                convo_summary = "\n".join(
+                    f"{m['role']}: {m['content'][:200]}"
+                    for m in st.session_state.chat_history[-6:]
+                )
+                suggestions = generate_smart_suggestions(convo_summary)
+            except Exception:
                 suggestions = [
                     "Run a climate simulation for this planet",
                     "Compare with Earth",
                     "Find similar planets in the catalog",
                 ]
-            s_cols = st.columns(3)
-            for c, s in zip(s_cols, suggestions):
-                with c:
-                    if st.button(s, key=f"sug_{hash(s)}"):
-                        st.session_state.chat_history.append({"role": "user", "content": s})
-                        st.rerun()
-
-    # Transparent reasoning panel (enhancement B2)
-    with col_reasoning:
-        st.subheader("Reasoning Chain")
-        _steps = st.session_state.get("_last_agent_steps", [])
-        if _steps:
-            for i, (action, obs) in enumerate(_steps):
-                is_expert = action.tool == "consult_domain_expert"
-                if is_expert:
-                    st.markdown(
-                        '<div style="background:linear-gradient(135deg,#1a237e,#4a148c);'
-                        'padding:12px;border-radius:8px;border:1px solid #7c4dff;'
-                        'margin-bottom:8px">'
-                        '<strong style="color:#b388ff">'
-                        'Expert Opinion</strong></div>',
-                        unsafe_allow_html=True,
-                    )
-                    st.markdown(sanitize_latex(obs[:800]))
-                else:
-                    with st.expander(f"Step {i+1}: {action.tool}", expanded=(i == 0)):
-                        st.markdown(f"**Tool:** `{action.tool}`")
-                        st.markdown(f"**Input:** `{action.tool_input}`")
-                        st.markdown(f"**Output:** {sanitize_latex(obs[:500])}")
         else:
-            st.info("Reasoning steps appear here after each agent response.")
+            suggestions = [
+                "Run a climate simulation for this planet",
+                "Compare with Earth",
+                "Find similar planets in the catalog",
+            ]
+        s_cols = st.columns(3)
+        for c, s in zip(s_cols, suggestions):
+            with c:
+                if st.button(s, key=f"sug_{hash(s)}"):
+                    st.session_state.chat_history.append({"role": "user", "content": s})
+                    st.rerun()
 
-    # ── Agent Visual Dashboard (full-width, below chat + reasoning) ──────
+    # ── Agent Visual Dashboard (full-width, below chat) ────────────────────
     _viz = st.session_state.get("_agent_viz", {})
     if _viz.get("analysis") or _viz.get("temperature_map") is not None:
         # Sync to global session state so Science tab also works
@@ -711,6 +698,33 @@ with tab_agent:
                 "radius_gap": _viz.get("radius_gap"),
                 "sulfur": _viz.get("sulfur"),
                 "co": _viz.get("co"),
+            }
+            st.session_state["climate_method"] = _viz.get("climate_method", "Unknown")
+        elif _viz.get("temperature_map") is not None:
+            # Agent ran run_climate_simulation without compute_habitability — build minimal planet_data
+            _tmap = _viz["temperature_map"]
+            _sephi = {"sephi_score": 0, "thermal_ok": False, "atmosphere_ok": False, "magnetic_ok": False}
+            st.session_state.current_planet_data = {
+                "T_eq": float(_tmap.mean()),
+                "T_min": float(_tmap.min()),
+                "T_max": float(_tmap.max()),
+                "T_mean": float(_tmap.mean()),
+                "ESI": 0,
+                "SEPHI": _sephi,
+                "HSF": _viz.get("hsf", 0),
+                "flux_earth": _viz.get("insol_earth", 0),
+                "star_teff": _viz.get("star_teff", 0),
+                "star_radius": _viz.get("star_radius", 0),
+                "planet_radius": _viz.get("planet_radius", 1.0),
+                "planet_mass": _viz.get("planet_mass", 1.0),
+                "semi_major": _viz.get("semi_major", 0),
+                "albedo": _viz.get("albedo", 0.3),
+                "eccentricity": 0,
+                "tidally_locked": _viz.get("tidally_locked", True),
+                "climate_method": _viz.get("climate_method", "Unknown"),
+                "radius_gap": None,
+                "sulfur": None,
+                "co": None,
             }
             st.session_state["climate_method"] = _viz.get("climate_method", "Unknown")
 
@@ -1040,6 +1054,31 @@ with tab_manual:
 
         if st.session_state.temperature_map is not None:
             d = st.session_state.current_planet_data
+            if d is None:
+                # Fallback when we have temp_map but no planet_data (e.g. from Agent-only run)
+                _tmap = st.session_state.temperature_map
+                d = {
+                    "T_eq": float(_tmap.mean()),
+                    "T_min": float(_tmap.min()),
+                    "T_max": float(_tmap.max()),
+                    "T_mean": float(_tmap.mean()),
+                    "ESI": 0,
+                    "SEPHI": {"sephi_score": 0, "thermal_ok": False, "atmosphere_ok": False, "magnetic_ok": False},
+                    "HSF": getattr(st.session_state, "hsf", 0) or 0,
+                    "flux_earth": 0,
+                    "star_teff": 0,
+                    "star_radius": 0,
+                    "planet_radius": planet_radius,
+                    "planet_mass": planet_mass,
+                    "semi_major": semi_major,
+                    "albedo": albedo,
+                    "eccentricity": eccentricity,
+                    "tidally_locked": locked,
+                    "climate_method": st.session_state.get("climate_method", "Unknown"),
+                    "radius_gap": None,
+                    "sulfur": None,
+                    "co": None,
+                }
 
             # ── ESI gauge (left) + 2×2 metric grid (right) ──
             gauge_col, metrics_col = st.columns([1, 1], gap="medium")
