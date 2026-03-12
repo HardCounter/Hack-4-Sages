@@ -135,6 +135,9 @@ hr{border-color:rgba(66,165,245,.15)!important;margin:var(--gap-lg) 0}
   width:18px!important;
   height:18px!important;
 }
+/* ── Slider value input — align with track, not label ── */
+[data-testid="stNumberInput"]{margin-top:1.6rem}
+[data-testid="stNumberInput"] input{text-align:center}
 </style>""",
     unsafe_allow_html=True,
 )
@@ -560,112 +563,125 @@ tab_agent, tab_manual, tab_catalog, tab_science, tab_system, tab_about = st.tabs
 # ═══════════════════════════════════════════════════════════════════════════════
 
 with tab_agent:
-    st.subheader("Conversation with AstroAgent")
+    col_chat, col_reasoning = st.columns([3, 1])
 
-    if st.session_state["llm_mode"] == "deterministic":
-        st.warning(
-            "Running in **Deterministic Tools Only** mode — "
-            "no LLM agent available. Switch to Single-LLM or "
-            "Dual-LLM mode in the System tab to enable the agent."
+    with col_chat:
+        st.subheader("Conversation with AstroAgent")
+
+        if st.session_state["llm_mode"] == "deterministic":
+            st.warning(
+                "Running in **Deterministic Tools Only** mode — "
+                "no LLM agent available. Switch to Single-LLM or "
+                "Dual-LLM mode in the System tab to enable the agent."
+            )
+
+        audience = st.radio(
+            "Explanation depth",
+            ["Scientist", "Outreach"],
+            horizontal=True,
+            index=0,
         )
 
-    audience = st.radio(
-        "Explanation depth",
-        ["Scientist", "Outreach"],
-        horizontal=True,
-        index=0,
-    )
+        for msg in st.session_state.chat_history:
+            with st.chat_message(msg["role"]):
+                st.markdown(sanitize_latex(msg["content"]))
 
-    for msg in st.session_state.chat_history:
-        with st.chat_message(msg["role"]):
-            st.markdown(sanitize_latex(msg["content"]))
+        if prompt := st.chat_input("Ask about an exoplanet\u2026"):
+            st.session_state["_agent_viz"] = {}
+            audience_hint = {
+                "Scientist": " (respond at expert level, cite equations)",
+                "Outreach": " (explain simply, use analogies and vivid language)",
+            }
+            full_prompt = prompt + audience_hint.get(audience, "")
 
-    if prompt := st.chat_input("Ask about an exoplanet\u2026"):
-        st.session_state["_agent_viz"] = {}
-        audience_hint = {
-            "Scientist": " (respond at expert level, cite equations)",
-            "Outreach": " (explain simply, use analogies and vivid language)",
-        }
-        full_prompt = prompt + audience_hint.get(audience, "")
+            st.session_state.chat_history.append({"role": "user", "content": prompt})
+            with st.chat_message("user"):
+                st.markdown(prompt)
 
-        st.session_state.chat_history.append({"role": "user", "content": prompt})
-        with st.chat_message("user"):
-            st.markdown(prompt)
+            with st.chat_message("assistant"):
+                with st.spinner("Agent reasoning\u2026"):
+                    try:
+                        from langchain_core.messages import AIMessage, HumanMessage
+                        lc_history = []
+                        for m in st.session_state.chat_history[:-1]:
+                            cls = HumanMessage if m["role"] == "user" else AIMessage
+                            lc_history.append(cls(content=m["content"]))
 
-        with st.chat_message("assistant"):
-            msg_placeholder = st.empty()
+                        agent = _load_agent(st.session_state["llm_mode"])
+                        if agent is None:
+                            answer = ("Agent unavailable in Deterministic mode. "
+                                      "Switch to Single-LLM or Dual-LLM in the System tab.")
+                            steps = []
+                        else:
+                            response = agent.invoke(
+                                {"input": full_prompt, "chat_history": lc_history}
+                            )
+                            answer = response["output"]
+                            steps = response.get("intermediate_steps", [])
+                    except Exception as exc:
+                        answer = f"Agent unavailable: {exc}"
+                        steps = []
+                    st.markdown(sanitize_latex(answer))
 
-        try:
-            from langchain_core.messages import AIMessage, HumanMessage
-            lc_history = []
-            for m in st.session_state.chat_history[:-1]:
-                cls = HumanMessage if m["role"] == "user" else AIMessage
-                lc_history.append(cls(content=m["content"]))
+            st.session_state.chat_history.append({"role": "assistant", "content": answer})
+            st.session_state["_last_agent_steps"] = steps
 
-            agent = _load_agent(st.session_state["llm_mode"])
-            if agent is None:
-                answer = (
-                    "Agent unavailable in Deterministic mode. "
-                    "Switch to Single-LLM or Dual-LLM in the System tab."
-                )
-                msg_placeholder.markdown(sanitize_latex(answer))
-            else:
-                answer = ""
-                # Progressive text display when streaming is supported
+            # Proactive suggestions (LLM-generated via Qwen, or static fallback)
+            st.markdown("---")
+            st.markdown("**Suggested next steps:**")
+            if st.session_state["llm_mode"] != "deterministic":
                 try:
-                    for chunk in agent.stream(
-                        {"input": full_prompt, "chat_history": lc_history},
-                    ):
-                        if isinstance(chunk, dict) and chunk.get("output"):
-                            answer = chunk["output"]
-                            msg_placeholder.markdown(sanitize_latex(answer))
-                except Exception:
-                    # Streaming may not be supported; fall back to single-shot invoke
-                    pass
-
-                if not answer:
-                    response = agent.invoke(
-                        {"input": full_prompt, "chat_history": lc_history}
+                    from modules.llm_helpers import generate_smart_suggestions
+                    convo_summary = "\n".join(
+                        f"{m['role']}: {m['content'][:200]}"
+                        for m in st.session_state.chat_history[-6:]
                     )
-                    answer = response["output"]
-                    msg_placeholder.markdown(sanitize_latex(answer))
-        except Exception as exc:
-            answer = f"Agent unavailable: {exc}"
-            msg_placeholder.markdown(sanitize_latex(answer))
-
-        st.session_state.chat_history.append({"role": "assistant", "content": answer})
-
-        # Proactive suggestions (LLM-generated via Qwen, or static fallback)
-        st.markdown("---")
-        st.markdown("**Suggested next steps:**")
-        if st.session_state["llm_mode"] != "deterministic":
-            try:
-                from modules.llm_helpers import generate_smart_suggestions
-                convo_summary = "\n".join(
-                    f"{m['role']}: {m['content'][:200]}"
-                    for m in st.session_state.chat_history[-6:]
-                )
-                suggestions = generate_smart_suggestions(convo_summary)
-            except Exception:
+                    suggestions = generate_smart_suggestions(convo_summary)
+                except Exception:
+                    suggestions = [
+                        "Run a climate simulation for this planet",
+                        "Compare with Earth",
+                        "Find similar planets in the catalog",
+                    ]
+            else:
                 suggestions = [
                     "Run a climate simulation for this planet",
                     "Compare with Earth",
                     "Find similar planets in the catalog",
                 ]
-        else:
-            suggestions = [
-                "Run a climate simulation for this planet",
-                "Compare with Earth",
-                "Find similar planets in the catalog",
-            ]
-        s_cols = st.columns(3)
-        for c, s in zip(s_cols, suggestions):
-            with c:
-                if st.button(s, key=f"sug_{hash(s)}"):
-                    st.session_state.chat_history.append({"role": "user", "content": s})
-                    st.rerun()
+            s_cols = st.columns(3)
+            for c, s in zip(s_cols, suggestions):
+                with c:
+                    if st.button(s, key=f"sug_{hash(s)}"):
+                        st.session_state.chat_history.append({"role": "user", "content": s})
+                        st.rerun()
 
-    # ── Agent Visual Dashboard (full-width, below chat) ────────────────────
+    # Transparent reasoning panel (enhancement B2)
+    with col_reasoning:
+        st.subheader("Reasoning Chain")
+        _steps = st.session_state.get("_last_agent_steps", [])
+        if _steps:
+            for i, (action, obs) in enumerate(_steps):
+                is_expert = action.tool == "consult_domain_expert"
+                if is_expert:
+                    st.markdown(
+                        '<div style="background:linear-gradient(135deg,#1a237e,#4a148c);'
+                        'padding:12px;border-radius:8px;border:1px solid #7c4dff;'
+                        'margin-bottom:8px">'
+                        '<strong style="color:#b388ff">'
+                        'Expert Opinion</strong></div>',
+                        unsafe_allow_html=True,
+                    )
+                    st.markdown(sanitize_latex(obs[:800]))
+                else:
+                    with st.expander(f"Step {i+1}: {action.tool}", expanded=(i == 0)):
+                        st.markdown(f"**Tool:** `{action.tool}`")
+                        st.markdown(f"**Input:** `{action.tool_input}`")
+                        st.markdown(f"**Output:** {sanitize_latex(obs[:500])}")
+        else:
+            st.info("Reasoning steps appear here after each agent response.")
+
+    # ── Agent Visual Dashboard (full-width, below chat + reasoning) ──────
     _viz = st.session_state.get("_agent_viz", {})
     if _viz.get("analysis") or _viz.get("temperature_map") is not None:
         # Sync to global session state so Science tab also works
@@ -700,35 +716,44 @@ with tab_agent:
                 "co": _viz.get("co"),
             }
             st.session_state["climate_method"] = _viz.get("climate_method", "Unknown")
-        elif _viz.get("temperature_map") is not None:
-            # Agent ran run_climate_simulation without compute_habitability — build minimal planet_data
-            _tmap = _viz["temperature_map"]
-            _sephi = {"sephi_score": 0, "thermal_ok": False, "atmosphere_ok": False, "magnetic_ok": False}
-            st.session_state.current_planet_data = {
-                "T_eq": float(_tmap.mean()),
-                "T_min": float(_tmap.min()),
-                "T_max": float(_tmap.max()),
-                "T_mean": float(_tmap.mean()),
-                "ESI": 0,
-                "SEPHI": _sephi,
-                "HSF": _viz.get("hsf", 0),
-                "flux_earth": _viz.get("insol_earth", 0),
-                "star_teff": _viz.get("star_teff", 0),
-                "star_radius": _viz.get("star_radius", 0),
-                "planet_radius": _viz.get("planet_radius", 1.0),
-                "planet_mass": _viz.get("planet_mass", 1.0),
-                "semi_major": _viz.get("semi_major", 0),
-                "albedo": _viz.get("albedo", 0.3),
-                "eccentricity": 0,
-                "tidally_locked": _viz.get("tidally_locked", True),
-                "climate_method": _viz.get("climate_method", "Unknown"),
-                "radius_gap": None,
-                "sulfur": None,
-                "co": None,
-            }
-            st.session_state["climate_method"] = _viz.get("climate_method", "Unknown")
 
         _render_agent_dashboard(_viz)
+
+
+def _labeled_slider(label, min_val, max_val, default, step, *, key, label_fmt=None, **kw):
+    """Slider with an editable number input synced to its right."""
+    input_key = f"{key}_input"
+    if key not in st.session_state:
+        st.session_state[key] = default
+    if input_key not in st.session_state:
+        st.session_state[input_key] = st.session_state[key]
+
+    user_cb = kw.pop('on_change', None)
+
+    def _sync_slider():
+        st.session_state[input_key] = st.session_state[key]
+        if user_cb:
+            user_cb()
+
+    def _sync_input():
+        st.session_state[key] = st.session_state[input_key]
+
+    num_fmt = kw.get('format', label_fmt)
+
+    c_sl, c_val = st.columns([5, 1])
+    with c_sl:
+        result = st.slider(label, min_value=min_val, max_value=max_val,
+                           step=step, key=key, on_change=_sync_slider, **kw)
+    with c_val:
+        inp_kw = dict(
+            min_value=min_val, max_value=max_val, step=step,
+            key=input_key, on_change=_sync_input,
+            label_visibility="collapsed",
+        )
+        if num_fmt:
+            inp_kw['format'] = num_fmt
+        st.number_input(label, **inp_kw)
+    return result
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -741,20 +766,21 @@ with tab_manual:
     with col_params:
         with st.container(border=True):
             st.markdown("##### Planet Parameters")
-            star_teff = st.slider("Stellar temperature [K]", 2500, 7500, 3042, 50,
-                help="Host star effective temperature in Kelvin")
-            star_radius = st.slider("Stellar radius [R\u2609]", 0.08, 3.0, 0.141, 0.01,
-                help="Host star radius in solar radii")
-            planet_radius = st.slider("Planet radius [R\u2295]", 0.5, 2.5, 1.07, 0.01,
-                help="Planet radius in Earth radii")
-            planet_mass = st.slider("Planet mass [M\u2295]", 0.1, 15.0, 1.27, 0.1,
-                help="Planet mass in Earth masses")
-            semi_major = st.slider(
-                "Semi-major axis [AU]", 0.01, 2.0, 0.0485, 0.001, format="%.4f",
+            star_teff = _labeled_slider("Stellar temperature [K]", 2500, 7500, 3042, 50,
+                key="m_star_teff", help="Host star effective temperature in Kelvin")
+            star_radius = _labeled_slider("Stellar radius [R\u2609]", 0.08, 3.0, 0.141, 0.01,
+                key="m_star_radius", help="Host star radius in solar radii")
+            planet_radius = _labeled_slider("Planet radius [R\u2295]", 0.5, 2.5, 1.07, 0.01,
+                key="m_planet_radius", help="Planet radius in Earth radii")
+            planet_mass = _labeled_slider("Planet mass [M\u2295]", 0.1, 15.0, 1.27, 0.1,
+                key="m_planet_mass", help="Planet mass in Earth masses")
+            semi_major = _labeled_slider(
+                "Semi-major axis [AU]", 0.01, 2.0, 0.0485, 0.001,
+                key="m_semi_major", label_fmt="%.4f", format="%.4f",
                 help="Orbital semi-major axis in astronomical units",
             )
-            eccentricity = st.slider("Eccentricity", 0.0, 0.9, 0.0, 0.01,
-                help="Orbital eccentricity (0 = circular)")
+            eccentricity = _labeled_slider("Eccentricity", 0.0, 0.9, 0.0, 0.01,
+                key="m_eccentricity", help="Orbital eccentricity (0 = circular)")
             _SURFACE_LABELS = {
                 "Mixed rocky": "mixed_rocky",
                 "Ocean world": "ocean",
@@ -774,14 +800,14 @@ with tab_manual:
                 help="Atmosphere class for albedo estimation")]
             from modules.astro_physics import estimate_albedo
             _albedo_est = estimate_albedo(surface_type, atmo_albedo_type)
-            albedo = st.slider("Bond albedo (override)", 0.0, 1.0,
-                _albedo_est["albedo"], 0.01,
+            albedo = _labeled_slider("Bond albedo (override)", 0.0, 1.0,
+                _albedo_est["albedo"], 0.01, key="m_albedo", label_fmt="%.2f",
                 help=f"Estimated: {_albedo_est['albedo']:.2f} ± {_albedo_est['albedo_uncertainty']:.2f}")
             locked = st.checkbox("Tidally locked", True)
-            co_ratio = st.slider("C/O Ratio", 0.1, 1.5, 0.55, 0.01,
-                help="Carbon-to-Oxygen ratio. Solar \u2248 0.55")
-            surface_pressure = st.slider("Surface Pressure (bar)", 0.001, 100.0, 1.0, 0.1,
-                help="Surface atmospheric pressure in bar")
+            co_ratio = _labeled_slider("C/O Ratio", 0.1, 1.5, 0.55, 0.01,
+                key="m_co_ratio", help="Carbon-to-Oxygen ratio. Solar \u2248 0.55")
+            surface_pressure = _labeled_slider("Surface Pressure (bar)", 0.001, 100.0, 1.0, 0.1,
+                key="m_surface_pressure", help="Surface atmospheric pressure in bar")
             _ATM_LABELS = {
                 "H₂-rich (Reducing)": "h2_rich",
                 "O₂-rich (Oxidising)": "o2_rich",
@@ -1054,31 +1080,6 @@ with tab_manual:
 
         if st.session_state.temperature_map is not None:
             d = st.session_state.current_planet_data
-            if d is None:
-                # Fallback when we have temp_map but no planet_data (e.g. from Agent-only run)
-                _tmap = st.session_state.temperature_map
-                d = {
-                    "T_eq": float(_tmap.mean()),
-                    "T_min": float(_tmap.min()),
-                    "T_max": float(_tmap.max()),
-                    "T_mean": float(_tmap.mean()),
-                    "ESI": 0,
-                    "SEPHI": {"sephi_score": 0, "thermal_ok": False, "atmosphere_ok": False, "magnetic_ok": False},
-                    "HSF": getattr(st.session_state, "hsf", 0) or 0,
-                    "flux_earth": 0,
-                    "star_teff": 0,
-                    "star_radius": 0,
-                    "planet_radius": planet_radius,
-                    "planet_mass": planet_mass,
-                    "semi_major": semi_major,
-                    "albedo": albedo,
-                    "eccentricity": eccentricity,
-                    "tidally_locked": locked,
-                    "climate_method": st.session_state.get("climate_method", "Unknown"),
-                    "radius_gap": None,
-                    "sulfur": None,
-                    "co": None,
-                }
 
             # ── ESI gauge (left) + 2×2 metric grid (right) ──
             gauge_col, metrics_col = st.columns([1, 1], gap="medium")

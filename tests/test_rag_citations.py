@@ -1,12 +1,16 @@
 """Tests for RAG citation retrieval — covers TF-IDF fallback, topic filtering,
-hybrid search, key findings, and citation formatting across the 40-paper corpus."""
+hybrid search, key findings, citation formatting, integration with the
+cite_scientific_literature tool, and domain coverage across the 40-paper corpus."""
 
 from modules.rag_citations import (
     _build_composite_document,
     _fallback_keyword_search,
     _filter_by_topics,
+    _hybrid_search,
+    _paper_to_citation,
     _PAPERS,
     _PAPERS_BY_ID,
+    _RRF_K,
     _tfidf_score,
     _tokenize,
     cite_literature,
@@ -228,3 +232,170 @@ class TestDomainCoverage:
     def test_ocean_heat_transport(self):
         results = _fallback_keyword_search("ocean heat transport tidally locked", n_results=3)
         assert any("ocean" in r["title"].lower() for r in results)
+
+    def test_tidal_heating_magnetic_field(self):
+        results = _fallback_keyword_search("tidal heating magnetic dynamo eccentricity", n_results=3)
+        assert any("tidal" in r["title"].lower() for r in results)
+
+    def test_mass_radius_relation(self):
+        results = _fallback_keyword_search("mass radius relation terran neptunian", n_results=3)
+        assert any("mass" in r["title"].lower() or "radius" in r["title"].lower()
+                    for r in results)
+
+    def test_pre_main_sequence(self):
+        results = _fallback_keyword_search("pre-main-sequence stellar luminosity habitable zone", n_results=3)
+        assert any("pre-main-sequence" in r["title"].lower() or "pre_main_sequence" in r["abstract"].lower()
+                    for r in results)
+
+    def test_runaway_greenhouse(self):
+        results = _fallback_keyword_search("runaway greenhouse radiation limit", n_results=3)
+        assert any("runaway" in r["title"].lower() or "greenhouse" in r["title"].lower()
+                    for r in results)
+
+    def test_silicon_biochemistry(self):
+        results = _fallback_keyword_search("silicon alternative biochemistry", n_results=3)
+        assert any("silicon" in r["title"].lower() for r in results)
+
+
+# ── Hybrid search ────────────────────────────────────────────────────────────
+
+class TestHybridSearch:
+    """Test _hybrid_search (uses ChromaDB when available, fallback otherwise)."""
+
+    def test_returns_expected_count(self):
+        results = _hybrid_search("habitable zone boundaries", n_results=5)
+        assert len(results) == 5
+
+    def test_returns_required_keys(self):
+        results = _hybrid_search("exoplanet atmosphere", n_results=1)
+        assert len(results) >= 1
+        for key in ("title", "authors", "year", "journal", "abstract", "relevance_score"):
+            assert key in results[0], f"Missing key: {key}"
+
+    def test_respects_n_results(self):
+        for n in (1, 3, 7):
+            results = _hybrid_search("planet", n_results=n)
+            assert len(results) == n
+
+    def test_topic_filter(self):
+        results = _hybrid_search(
+            "planet atmosphere", n_results=10, topics=["jwst"],
+        )
+        for r in results:
+            paper = next(p for p in _PAPERS if p["title"] == r["title"])
+            assert "jwst" in paper["topics"]
+
+    def test_hz_papers_for_hz_query(self):
+        results = _hybrid_search("habitable zone boundaries main sequence stars", n_results=5)
+        assert any("habitable" in r["title"].lower() for r in results)
+
+    def test_relevance_scores_are_positive(self):
+        results = _hybrid_search("climate modeling GCM", n_results=5)
+        for r in results:
+            assert float(r["relevance_score"]) > 0
+
+    def test_scores_are_descending(self):
+        results = _hybrid_search("biosignature oxygen false positive", n_results=5)
+        scores = [float(r["relevance_score"]) for r in results]
+        assert scores == sorted(scores, reverse=True)
+
+
+# ── Paper-to-citation conversion ─────────────────────────────────────────────
+
+class TestPaperToCitation:
+    def test_required_keys_present(self):
+        paper = _PAPERS_BY_ID["kopparapu2013"]
+        cit = _paper_to_citation(paper, 0.95)
+        for key in ("title", "authors", "year", "journal", "abstract", "relevance_score"):
+            assert key in cit
+
+    def test_score_stringified(self):
+        cit = _paper_to_citation(_PAPERS_BY_ID["yang2013"], 0.12345)
+        assert cit["relevance_score"] == "0.123"
+
+    def test_key_findings_included(self):
+        cit = _paper_to_citation(_PAPERS_BY_ID["meadows2018"], 0.5)
+        assert "key_findings" in cit
+        assert isinstance(cit["key_findings"], list)
+
+    def test_paper_without_key_findings(self):
+        fake = {
+            "id": "test2099",
+            "title": "Test",
+            "authors": "A.",
+            "year": "2099",
+            "journal": "J.",
+            "abstract": "Abstract.",
+        }
+        cit = _paper_to_citation(fake, 0.1)
+        assert "key_findings" not in cit
+
+
+# ── RRF constant sanity ──────────────────────────────────────────────────────
+
+class TestRRFConstant:
+    def test_rrf_k_value(self):
+        assert _RRF_K == 60
+
+    def test_rrf_score_formula(self):
+        """Top-ranked in both lists should score higher than mid-ranked."""
+        top_score = 1.0 / (_RRF_K + 1) + 1.0 / (_RRF_K + 1)
+        mid_score = 1.0 / (_RRF_K + 20) + 1.0 / (_RRF_K + 20)
+        assert top_score > mid_score
+
+
+# ── Integration: cite_scientific_literature tool ─────────────────────────────
+
+class TestCiteScientificLiteratureTool:
+    """End-to-end test of the LangChain tool wrapper in agent_setup.py."""
+
+    def test_returns_string(self):
+        from modules.agent_setup import cite_scientific_literature
+        result = cite_scientific_literature.invoke(
+            {"query": "habitable zone M dwarf", "topics": ""},
+        )
+        assert isinstance(result, str)
+        assert len(result) > 0
+
+    def test_contains_references_block(self):
+        from modules.agent_setup import cite_scientific_literature
+        result = cite_scientific_literature.invoke(
+            {"query": "tidal locking atmospheric collapse", "topics": ""},
+        )
+        assert "**References:**" in result
+
+    def test_topic_filtering(self):
+        from modules.agent_setup import cite_scientific_literature
+        result = cite_scientific_literature.invoke(
+            {"query": "exoplanet atmosphere observation", "topics": "jwst"},
+        )
+        assert "JWST" in result or "jwst" in result.lower()
+
+    def test_no_results_message(self):
+        from modules.agent_setup import cite_scientific_literature
+        result = cite_scientific_literature.invoke(
+            {"query": "quantum gravity string theory", "topics": "nonexistent_topic"},
+        )
+        assert result == "No relevant citations found."
+
+    def test_includes_key_findings(self):
+        from modules.agent_setup import cite_scientific_literature
+        result = cite_scientific_literature.invoke(
+            {"query": "biosignature false positive oxygen", "topics": "biosignatures"},
+        )
+        assert "Key findings:" in result or "key findings" in result.lower()
+
+    def test_abstract_truncation(self):
+        """The tool truncates abstracts to 500 chars for LLM context budget."""
+        from modules.agent_setup import cite_scientific_literature
+        result = cite_scientific_literature.invoke(
+            {"query": "habitable zone boundaries main sequence", "topics": ""},
+        )
+        lines = result.split("\n")
+        for line in lines:
+            if line.startswith("**") and "—" in line:
+                continue
+            if line.startswith("_") or line.startswith("Key findings:"):
+                continue
+            if line.startswith("- "):
+                continue
