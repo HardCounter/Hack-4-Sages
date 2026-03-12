@@ -8,6 +8,7 @@ Tabs
 3. Planet Catalog    - NASA archive browser + famous-planet gallery
 4. Science Dashboard - HZ diagram, atmospheric cross-section, uncertainty
 5. System            - self-diagnostics, health, export
+6. About us          - project and team overview
 """
 
 import io
@@ -232,13 +233,14 @@ st.markdown(
 st.markdown('<div style="margin-bottom:1rem"></div>', unsafe_allow_html=True)
 # ─── Tabs ────────────────────────────────────────────────────────────────────
 
-tab_agent, tab_manual, tab_catalog, tab_science, tab_system = st.tabs(
+tab_agent, tab_manual, tab_catalog, tab_science, tab_system, tab_about = st.tabs(
     [
         "Agent AI",
         "Manual Mode",
         "Catalog",
         "Science",
         "System",
+        "About us",
     ]
 )
 
@@ -1752,11 +1754,10 @@ flowchart TB
             language="bash",
         )
 
-# ─── About section (outside tabs so scroll always works) ────────────────────
+# ─── About us tab ────────────────────────────────────────────────────────────
 
-st.markdown('<div id="about-section"></div>', unsafe_allow_html=True)
-st.markdown("---")
-with st.expander("About", expanded=False):
+with tab_about:
+    st.subheader("About us")
     st.markdown("""
 **Autonomous Exoplanetary Digital Twin** was built for the Hack4Sages 2026 hackathon.
 
