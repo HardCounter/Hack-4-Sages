@@ -939,49 +939,59 @@ with tab_manual:
             # ── AI Interpretation & Physics Review (dual-LLM) ─────────
             if st.session_state["llm_mode"] != "deterministic":
                 with st.expander("AI Interpretation", expanded=False):
-                    try:
-                        from modules.llm_helpers import (
-                            classify_climate_state,
-                            interpret_simulation,
-                            review_elm_output,
-                        )
-                        with st.spinner("Domain expert interpreting results..."):
-                            interp = interpret_simulation(d)
-                        st.markdown(sanitize_latex(interp))
-
-                        with st.spinner("Classifying climate state..."):
-                            tmap = st.session_state.temperature_map
-                            cls = classify_climate_state(
-                                float(tmap.min()), float(tmap.max()),
-                                float(tmap.mean()), locked,
+                    _cached = st.session_state.get("_ai_interp_cache")
+                    _need_refresh = _cached is None or should_compute
+                    if _need_refresh:
+                        try:
+                            from modules.llm_helpers import (
+                                classify_climate_state,
+                                interpret_simulation,
+                                review_elm_output,
                             )
-                        state_climate = cls.get("state", "Unknown")
+                            with st.spinner("Domain expert interpreting results..."):
+                                interp = interpret_simulation(d)
+
+                            with st.spinner("Classifying climate state..."):
+                                tmap = st.session_state.temperature_map
+                                cls = classify_climate_state(
+                                    float(tmap.min()), float(tmap.max()),
+                                    float(tmap.mean()), locked,
+                                )
+
+                            with st.spinner("Physics plausibility review..."):
+                                params_for_review = {
+                                    "star_teff": star_teff, "star_radius": star_radius,
+                                    "planet_radius": planet_radius, "planet_mass": planet_mass,
+                                    "semi_major": semi_major, "albedo": albedo,
+                                    "tidally_locked": locked,
+                                }
+                                review = review_elm_output(
+                                    params_for_review,
+                                    float(tmap.min()), float(tmap.max()), float(tmap.mean()),
+                                )
+                            st.session_state["_ai_interp_cache"] = {
+                                "interp": interp, "cls": cls, "review": review,
+                            }
+                        except Exception as exc:
+                            st.caption(f"*AI interpretation unavailable — {exc}*")
+                            st.session_state["_ai_interp_cache"] = None
+
+                    _cached = st.session_state.get("_ai_interp_cache")
+                    if _cached:
+                        st.markdown(sanitize_latex(_cached["interp"]))
+                        cls = _cached["cls"]
                         st.info(
-                            f"**Climate state:** {state_climate} "
+                            f"**Climate state:** {cls.get('state', 'Unknown')} "
                             f"({cls.get('confidence', '?')} confidence)\n\n"
                             f"{cls.get('reason', '')}"
                         )
-
-                        with st.spinner("Physics plausibility review..."):
-                            params_for_review = {
-                                "star_teff": star_teff, "star_radius": star_radius,
-                                "planet_radius": planet_radius, "planet_mass": planet_mass,
-                                "semi_major": semi_major, "albedo": albedo,
-                                "tidally_locked": locked,
-                            }
-                            review = review_elm_output(
-                                params_for_review,
-                                float(tmap.min()), float(tmap.max()), float(tmap.mean()),
-                            )
-                        review = sanitize_latex(review)
+                        review = sanitize_latex(_cached["review"])
                         if review.lower().startswith("plausible"):
                             st.success(f"⬢ {review}")
                         elif review.lower().startswith("warning"):
                             st.warning(review)
                         else:
                             st.info(review)
-                    except Exception as exc:
-                        st.caption(f"*AI interpretation unavailable — {exc}*")
         else:
             st.info("Adjust parameters and press **Run Simulation** (or enable live mode).")
 
