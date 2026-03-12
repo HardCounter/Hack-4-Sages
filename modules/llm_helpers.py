@@ -88,25 +88,32 @@ def _extract_content(resp) -> str:
         return resp["message"]["content"]
 
 
-def _ask_domain(prompt: str) -> str:
+_DEFAULT_OPTS = {"num_predict": 2048, "temperature": 0.4}
+
+
+def _ask_domain(prompt: str, **extra_opts) -> str:
     """Send a single prompt to the AstroSage domain expert."""
     if not _HAS_OLLAMA:
         raise ImportError("ollama package not installed")
+    opts = {**_DEFAULT_OPTS, **extra_opts}
     resp = _oll.chat(
         model=_DOMAIN_MODEL,
         messages=[{"role": "user", "content": prompt}],
+        options=opts,
     )
     return _extract_content(resp)
 
 
-def _ask_orchestrator(prompt: str) -> str:
+def _ask_orchestrator(prompt: str, **extra_opts) -> str:
     """Send a single prompt to the orchestrator (or domain model in single-LLM mode)."""
     if not _HAS_OLLAMA:
         raise ImportError("ollama package not installed")
     model = _resolve_orchestrator_model()
+    opts = {**_DEFAULT_OPTS, **extra_opts}
     resp = _oll.chat(
         model=model,
         messages=[{"role": "user", "content": prompt}],
+        options=opts,
     )
     return _extract_content(resp)
 
@@ -118,6 +125,31 @@ def _safe(fn, *args, fallback: str = "") -> str:
     except Exception as exc:
         logger.warning("LLM helper %s failed: %s", fn.__name__, exc)
         return fallback
+
+
+def _parse_json_response(raw: str, fallback_state: str = "Unknown") -> Dict[str, str]:
+    """Extract a JSON object from an LLM response, tolerating LaTeX and formatting noise."""
+    try:
+        start = raw.index("{")
+        end = raw.rindex("}") + 1
+        snippet = raw[start:end]
+        return json.loads(snippet)
+    except (ValueError, json.JSONDecodeError):
+        pass
+
+    # Regex fallback: pull known fields even when JSON is malformed
+    state_m = re.search(r'"state"\s*:\s*"([^"]+)"', raw)
+    conf_m = re.search(r'"confidence"\s*:\s*"([^"]+)"', raw)
+    reason_m = re.search(r'"reason"\s*:\s*"((?:[^"\\]|\\.)*)"', raw)
+
+    if state_m:
+        return {
+            "state": state_m.group(1),
+            "confidence": conf_m.group(1) if conf_m else "medium",
+            "reason": reason_m.group(1) if reason_m else "",
+        }
+
+    return {"state": fallback_state, "confidence": "low", "reason": "LLM response could not be parsed."}
 
 
 # ─── Domain-expert helpers (astro-agent) ──────────────────────────────────────
@@ -151,20 +183,16 @@ def classify_climate_state(
         "You are an astrophysics classifier. Given the surface temperature "
         "statistics of a planet, classify the climate state as exactly ONE of: "
         "Eyeball, Lobster, Greenhouse, Temperate.\n\n"
-        "Respond ONLY with a JSON object: "
-        '{"state": "...", "confidence": "high|medium|low", "reason": "one sentence"}. '
-        "In the reason field, use LaTeX for quantities (e.g. $T_{mean}$).\n\n"
+        "Respond ONLY with a JSON object — no markdown, no code fences, "
+        "no LaTeX. Use plain text with units (e.g. T_mean = 153 K).\n"
+        'Format: {"state": "...", "confidence": "high|medium|low", '
+        '"reason": "one sentence in plain text"}\n\n'
         f"T_min={T_min:.1f} K, T_max={T_max:.1f} K, T_mean={T_mean:.1f} K, "
         f"tidally_locked={tidally_locked}"
     )
     raw = _safe(_ask_domain, prompt,
                 fallback='{"state": "Unknown", "confidence": "low", "reason": "LLM unavailable"}')
-    try:
-        start = raw.index("{")
-        end = raw.rindex("}") + 1
-        return json.loads(raw[start:end])
-    except (ValueError, json.JSONDecodeError):
-        return {"state": "Unknown", "confidence": "low", "reason": raw[:200]}
+    return _parse_json_response(raw, fallback_state="Unknown")
 
 
 def review_elm_output(
@@ -249,12 +277,47 @@ def compare_planets(planet_a: Dict, planet_b: Dict) -> str:
 
 # ─── Orchestrator helpers (Qwen 2.5) ─────────────────────────────────────────
 
+def _looks_like_planet_name(text: str) -> bool:
+    """Heuristic: does *text* look like a specific planet name rather than a descriptive query?"""
+    text = text.strip()
+    _PLANET_PREFIXES = (
+        "TRAPPIST", "Proxima", "Kepler", "TOI-", "K2-", "LHS", "GJ",
+        "HD ", "HR ", "WASP", "HAT-P", "CoRoT", "55 Cnc", "Wolf",
+        "Ross", "Tau Cet", "Gliese",
+    )
+    if any(text.upper().startswith(p.upper()) for p in _PLANET_PREFIXES):
+        return True
+    if re.match(r"^[A-Z0-9][\w\s.\-]+[bcdefgh]$", text.strip(), re.IGNORECASE):
+        return True
+    return False
+
+
+def generate_planet_name_query(name: str) -> str:
+    """Build a direct ADQL query to find a planet by name (no LLM needed).
+
+    Uses UPPER() for case-insensitive matching and trims whitespace.
+    """
+    safe_name = name.strip().replace("'", "''").upper()
+    return (
+        "SELECT pl_name, pl_radj, pl_bmassj, pl_orbsmax, pl_orbper, "
+        "pl_insol, pl_eqt, pl_dens, st_teff, st_rad, st_lum, st_mass, "
+        "sy_dist, disc_year, discoverymethod "
+        f"FROM pscomppars WHERE UPPER(pl_name) LIKE '%{safe_name}%'"
+    )
+
+
 def generate_adql_query(natural_language: str) -> str:
     """Convert a natural-language question into an ADQL query.
 
     The query targets the ``pscomppars`` table in the NASA Exoplanet
     Archive.  Used in the Catalog tab's search bar.
+
+    If the input looks like a planet name, a direct name-match query
+    is returned without invoking the LLM.
     """
+    if _looks_like_planet_name(natural_language):
+        return generate_planet_name_query(natural_language)
+
     prompt = (
         "You are an expert in ADQL (Astronomical Data Query Language). "
         "Convert the following natural-language question into a valid "
@@ -264,10 +327,27 @@ def generate_adql_query(natural_language: str) -> str:
         "pl_insol (S_Earth), pl_eqt (K), pl_dens (g/cm3), "
         "st_teff (K), st_rad (R_sun), st_lum (log L_sun), st_mass (M_sun), "
         "sy_dist (pc), disc_year, discoverymethod.\n\n"
-        "Return ONLY the SQL query, no explanation.\n\n"
-        f"Question: {natural_language}"
+        "IMPORTANT RULES:\n"
+        "- To search by planet name use: WHERE pl_name LIKE '%<name>%'\n"
+        "- pl_radj is in Jupiter radii, pl_bmassj is in Jupiter masses\n"
+        "- Always include pl_name in the SELECT\n"
+        "- Return ONLY the SQL query, no explanation or markdown\n\n"
+        "Examples:\n"
+        "Q: rocky planets closer than 10 parsecs\n"
+        "A: SELECT pl_name, pl_radj, pl_bmassj, pl_orbsmax, st_teff, sy_dist "
+        "FROM pscomppars WHERE pl_radj < 0.15 AND sy_dist < 10 "
+        "AND pl_radj IS NOT NULL AND sy_dist IS NOT NULL\n\n"
+        "Q: planets discovered by transit after 2020\n"
+        "A: SELECT pl_name, pl_radj, disc_year, discoverymethod "
+        "FROM pscomppars WHERE discoverymethod = 'Transit' "
+        "AND disc_year > 2020\n\n"
+        f"Q: {natural_language}\nA: "
     )
-    return _safe(_ask_orchestrator, prompt, fallback="")
+    raw = _safe(_ask_orchestrator, prompt, fallback="")
+    clean = raw.strip().strip("`").strip()
+    if clean.lower().startswith("sql"):
+        clean = clean[3:].strip()
+    return clean
 
 
 def generate_smart_suggestions(conversation_summary: str) -> list:

@@ -14,12 +14,45 @@ import pandas as pd
 import numpy as np
 
 
-class _DeviceRemappingUnpickler(pickle.Unpickler):
-    """Unpickler that remaps CUDA tensor storages to the available device.
+class _LenientMT19937:
+    """MT19937 stand-in that silently ignores incompatible pickled state.
 
-    Fixes 'Attempting to deserialize object on a CUDA device but
-    torch.cuda.is_available() is False' when loading a model that was
-    trained on CUDA/ROCm on a machine that has no GPU or a different backend.
+    When a CTGAN model is saved on numpy 2.x and loaded on 1.x (or
+    vice-versa), the internal MT19937 state format may differ. Since the
+    random state is irrelevant for inference / sampling, we just absorb
+    the incompatible state and delegate to a fresh MT19937.
+    """
+
+    def __init__(self):
+        from numpy.random import MT19937
+        self._inner = MT19937()
+
+    def __getattr__(self, name):
+        return getattr(self._inner, name)
+
+    def __setstate__(self, state):
+        try:
+            self._inner.__setstate__(state)
+        except (ValueError, TypeError, KeyError):
+            pass
+
+    def __getstate__(self):
+        return self._inner.__getstate__()
+
+    def __reduce__(self):
+        return self._inner.__reduce__()
+
+
+class _DeviceRemappingUnpickler(pickle.Unpickler):
+    """Unpickler that remaps CUDA tensor storages and numpy BitGenerators.
+
+    Fixes:
+    * 'Attempting to deserialize object on a CUDA device but
+      torch.cuda.is_available() is False' when loading a model trained
+      on CUDA/ROCm.
+    * '<class numpy.random._mt19937.MT19937> is not a known BitGenerator'
+      caused by pickle files saved with a different numpy version that
+      stored the class object instead of the string name.
     """
 
     def __init__(self, f):
@@ -39,6 +72,23 @@ class _DeviceRemappingUnpickler(pickle.Unpickler):
                 return torch.load(io.BytesIO(b), map_location=dev, weights_only=False)
 
             return _load
+
+        if module == "numpy.random._pickle":
+            if name == "__bit_generator_ctor":
+                def _compat_bit_generator_ctor(bit_gen_name="MT19937"):
+                    if isinstance(bit_gen_name, type):
+                        bit_gen_name = bit_gen_name.__name__
+                    if not isinstance(bit_gen_name, str):
+                        return _LenientMT19937()
+                    return _LenientMT19937()
+                return _compat_bit_generator_ctor
+
+            if name == "__randomstate_ctor":
+                from numpy.random import RandomState
+                def _compat_randomstate_ctor(bit_gen_name="MT19937"):
+                    return RandomState()
+                return _compat_randomstate_ctor
+
         return super().find_class(module, name)
 
 try:

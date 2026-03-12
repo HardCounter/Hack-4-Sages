@@ -91,21 +91,27 @@ def get_planet_data(planet_name: str) -> Optional[pd.Series]:
 
 
 def get_habitable_candidates(
-    radius_min: float = 0.5,
-    radius_max: float = 2.5,
-    insol_min: float = 0.2,
-    insol_max: float = 2.0,
+    radius_min_earth: float = 0.5,
+    radius_max_earth: float = 2.5,
+    insol_min: float = 0.1,
+    insol_max: float = 10.0,
     teff_min: int = 2500,
     teff_max: int = 7000,
 ) -> pd.DataFrame:
-    """Earth-sized planets inside the conservative habitable zone."""
+    """Earth-sized planets inside a broad habitable zone.
+
+    Parameters are in Earth radii; converted to Jupiter radii for the
+    ``pl_radj`` column used by the NASA ``pscomppars`` table.
+    """
+    r_min_jup = radius_min_earth / R_JUPITER_TO_EARTH
+    r_max_jup = radius_max_earth / R_JUPITER_TO_EARTH
     query = f"""
     SELECT pl_name, pl_radj, pl_bmassj, pl_orbsmax, pl_orbper,
            pl_insol, pl_eqt, pl_dens,
            st_teff, st_rad, st_lum, st_mass,
            disc_year, discoverymethod
     FROM pscomppars
-    WHERE pl_radj BETWEEN {radius_min} AND {radius_max}
+    WHERE pl_radj BETWEEN {r_min_jup:.6f} AND {r_max_jup:.6f}
       AND pl_insol BETWEEN {insol_min} AND {insol_max}
       AND st_teff BETWEEN {teff_min} AND {teff_max}
       AND pl_radj IS NOT NULL

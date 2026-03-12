@@ -24,8 +24,16 @@ from .elm_surrogate import ELMClimateSurrogate
 from .gcm_benchmarks import compare_surrogate_to_gcm, get_gcm_benchmark
 from .pinnformer3d import TrainingHistory
 
+try:
+    from .pinnformer3d import load_pinnformer, sample_surface_map
+    _HAS_PINN = True
+except ImportError:
+    _HAS_PINN = False
+
 
 ELM_GCM_CASES = ("earth_like", "proxima_b", "hot_rock")
+
+PINN_GCM_CASES = ("proxima_b", "hot_rock")
 
 
 def _build_elm_features_from_gcm(case_key: str) -> Dict[str, float]:
@@ -134,6 +142,58 @@ def summarise_ctgan_statistics(
         "synthetic": synth_stats,
         "summary": {"max_correlation_difference": max_corr_diff},
     }
+
+
+def evaluate_pinn_against_gcm(
+    model_or_path: object,
+    device: str = "cpu",
+    n_lat: int = 32,
+    n_lon: int = 64,
+) -> Dict[str, Dict[str, float]]:
+    """Compare a PINNFormer 3-D model to tidally-locked GCM benchmark cases.
+
+    Only the tidally-locked benchmarks (proxima_b, hot_rock) are used
+    because PINNFormer solves for synchronously rotating atmospheres.
+
+    Parameters
+    ----------
+    model_or_path : PINNFormer3D model or str path to weights
+    device : torch device string
+    n_lat, n_lon : grid resolution (must match GCM benchmark defaults)
+
+    Returns
+    -------
+    dict  mapping case_key -> metrics dict with pattern_correlation,
+          rmse_K, bias_K, zonal_mean_rmse_K, plus pinn/gcm temperature stats.
+    """
+    if not _HAS_PINN:
+        raise ImportError("PyTorch is required for PINNFormer evaluation.")
+
+    if isinstance(model_or_path, str):
+        model = load_pinnformer(model_or_path, device=device)
+    else:
+        model = model_or_path
+
+    results: Dict[str, Dict[str, float]] = {}
+    for key in PINN_GCM_CASES:
+        bench = get_gcm_benchmark(key)
+        if bench is None:
+            continue
+
+        gcm_map = bench["temperature_map"]
+        pinn_map = sample_surface_map(model, n_lat=n_lat, n_lon=n_lon, device=device)
+
+        metrics = compare_surrogate_to_gcm(pinn_map, gcm_map)
+
+        metrics["pinn_T_mean"] = round(float(pinn_map.mean()), 2)
+        metrics["pinn_T_min"] = round(float(pinn_map.min()), 2)
+        metrics["pinn_T_max"] = round(float(pinn_map.max()), 2)
+        metrics["gcm_T_mean"] = round(float(gcm_map.mean()), 2)
+        metrics["gcm_T_min"] = round(float(gcm_map.min()), 2)
+        metrics["gcm_T_max"] = round(float(gcm_map.max()), 2)
+
+        results[key] = metrics
+    return results
 
 
 @dataclass
