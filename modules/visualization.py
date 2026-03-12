@@ -72,6 +72,7 @@ def create_3d_globe(
     star_teff: Optional[float] = None,
     cloud_map: Optional[np.ndarray] = None,
     cloud_opacity: float = 0.55,
+    temp_unit: str = "K",
 ) -> go.Figure:
     """Render an interactive 3-D sphere coloured by surface temperature.
 
@@ -81,6 +82,9 @@ def create_3d_globe(
     overlay is drawn on top of the thermal texture to visualise
     substellar cloud decks and nightside clearing.
     """
+    _offset = -273.15 if temp_unit == "°C" else 0.0
+    _unit = " °C" if temp_unit == "°C" else " K"
+
     n_lat, n_lon = temperature_map.shape
     theta = np.linspace(0, 2 * np.pi, n_lon)
     phi = np.linspace(-np.pi / 2, np.pi / 2, n_lat)
@@ -95,15 +99,18 @@ def create_3d_globe(
     # Roll by n_lon//2 so it lands at column 0 (theta=0, X=+1) which
     # faces the host-star marker placed at x=+3.
     tmap = np.roll(temperature_map, n_lon // 2, axis=1)
+    tmap_display = tmap + _offset
 
     cs = colorscale or SCIENCE_COLORSCALE
-    T_min, T_max = float(temperature_map.min()), float(temperature_map.max())
+    T_min, T_max = float(temperature_map.min()) + _offset, float(temperature_map.max()) + _offset
+    T_range = T_max - T_min if T_max > T_min else 1.0
+    cmin_display = T_min - 0.20 * T_range
 
     lat_deg = np.degrees(PHI)
     lon_deg = np.degrees(THETA)
     hover_text = np.array([
         [
-            f"<b>{tmap[i, j]:.1f} K</b><br>"
+            f"<b>{tmap_display[i, j]:.1f}{_unit}</b><br>"
             f"({lat_deg[i, j]:.1f}\u00b0, {lon_deg[i, j]:.1f}\u00b0)"
             for j in range(n_lon)
         ]
@@ -112,12 +119,12 @@ def create_3d_globe(
 
     surface = go.Surface(
         x=X, y=Y, z=Z,
-        surfacecolor=tmap,
+        surfacecolor=tmap_display,
         colorscale=cs,
-        cmin=T_min, cmax=T_max,
+        cmin=cmin_display, cmax=T_max,
         colorbar=dict(
-            title=dict(text="Temperature [K]", font=dict(size=14)),
-            ticksuffix=" K",
+            title=dict(text=f"Temperature [{temp_unit}]", font=dict(size=14)),
+            ticksuffix=_unit,
             len=0.75,
             thickness=20,
             x=1.02,
@@ -175,7 +182,10 @@ def create_3d_globe(
                 marker=dict(size=8, color=star_color, symbol="diamond"),
                 name="Host star",
                 hovertemplate=(
-                    f"Host star<br>T_eff={star_teff or '?'} K<extra></extra>"
+                    f"Host star<br>T_eff="
+                    f"{(star_teff + _offset):.0f}{_unit}"
+                    f"<extra></extra>"
+                    if star_teff else "Host star<extra></extra>"
                 ),
             )
         )
@@ -250,13 +260,16 @@ def create_3d_globe(
 def create_2d_heatmap(
     temperature_map: np.ndarray,
     planet_name: str = "Exoplanet",
+    temp_unit: str = "K",
 ) -> go.Figure:
+    _offset = -273.15 if temp_unit == "°C" else 0.0
+    display_map = temperature_map + _offset
     fig = px.imshow(
-        temperature_map,
+        display_map,
         labels=dict(
             x="Longitude [\u00b0]",
             y="Latitude [\u00b0]",
-            color="T [K]",
+            color=f"T [{temp_unit}]",
         ),
         x=np.linspace(0, 360, temperature_map.shape[1]),
         y=np.linspace(-90, 90, temperature_map.shape[0]),
@@ -266,7 +279,7 @@ def create_2d_heatmap(
     )
     fig.update_layout(
         title=f"{planet_name} \u2014 Temperature Map (2-D)",
-        coloraxis_colorbar=dict(title="T [K]"),
+        coloraxis_colorbar=dict(title=f"T [{temp_unit}]"),
         width=800,
         height=400,
         paper_bgcolor="black",
@@ -281,6 +294,7 @@ def create_hz_diagram(
     hz_boundaries: dict,
     planet_semi_major: float,
     star_teff: float,
+    temp_unit: str = "K",
 ) -> go.Figure:
     """Top-down habitable-zone diagram with planet position."""
     zones = [
@@ -312,7 +326,7 @@ def create_hz_diagram(
     ))
 
     fig.update_layout(
-        title=f"Habitable Zone (T_eff = {star_teff} K)",
+        title=f"Habitable Zone (T_eff = {(star_teff - 273.15 if temp_unit == '°C' else star_teff):.0f} {temp_unit})",
         xaxis=dict(title="Distance [AU]", color="white"),
         yaxis=dict(visible=False, range=[0, 1]),
         paper_bgcolor="black",
