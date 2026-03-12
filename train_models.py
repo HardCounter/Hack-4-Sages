@@ -179,6 +179,7 @@ def train_pinn(
     warmup_epochs: int = 500,
     validate_every: int = 2_000,
     checkpoint: bool = True,
+    early_stopping_patience: int = 0,
 ):
     from modules.pinnformer3d import (
         PINNPhysicsConfig,
@@ -212,6 +213,9 @@ def train_pinn(
         print(f"  LR warmup: {warmup_epochs} epochs")
     if validate_every > 0:
         print(f"  Validation every: {validate_every} epochs")
+    if early_stopping_patience > 0:
+        print(f"  Early stopping patience: {early_stopping_patience} checks "
+              f"({early_stopping_patience * validate_every} epochs)")
 
     checkpoint_dir = os.path.join(MODELS_DIR, "checkpoints") if checkpoint else None
     log_every = max(500, epochs // 100)
@@ -227,8 +231,11 @@ def train_pinn(
         warmup_epochs=warmup_epochs,
         checkpoint_dir=checkpoint_dir,
         validate_every=validate_every,
+        early_stopping_patience=early_stopping_patience,
     )
     elapsed = time.time() - t0
+    if history.early_stopped_at:
+        print(f"  Early stopped at epoch {history.early_stopped_at}")
     print(f"  Training completed in {elapsed/60:.1f} min")
     if history.validation:
         v = history.validation
@@ -301,6 +308,15 @@ def main():
         "--pinn-validate-every", type=int, default=2_000,
         help="Run validation every N epochs and track best model (default: 2000)"
     )
+    parser.add_argument(
+        "--pinn-early-stop", type=int, default=0,
+        help=(
+            "Stop training if validation PDE RMSE does not improve for N "
+            "consecutive checks. E.g. --pinn-early-stop 5 with "
+            "--pinn-validate-every 2000 stops after 10000 stale epochs. "
+            "(default: 0 = disabled)"
+        ),
+    )
     args = parser.parse_args()
 
     ensure_dir()
@@ -324,6 +340,7 @@ def main():
             warmup_epochs=args.pinn_warmup,
             validate_every=args.pinn_validate_every,
             checkpoint=True,
+            early_stopping_patience=args.pinn_early_stop,
         )
 
     print(f"\n{'='*60}")
