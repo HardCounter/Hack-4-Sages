@@ -88,25 +88,36 @@ def _extract_content(resp) -> str:
         return resp["message"]["content"]
 
 
-def _ask_domain(prompt: str) -> str:
+_DEFAULT_OPTS = {"num_predict": 2048, "temperature": 0.4}
+
+
+def _ask_domain(prompt: str, **extra_opts) -> str:
     """Send a single prompt to the AstroSage domain expert."""
+    if _ACTIVE_MODE == "deterministic":
+        raise RuntimeError("LLM calls disabled in deterministic mode")
     if not _HAS_OLLAMA:
         raise ImportError("ollama package not installed")
+    opts = {**_DEFAULT_OPTS, **extra_opts}
     resp = _oll.chat(
         model=_DOMAIN_MODEL,
         messages=[{"role": "user", "content": prompt}],
+        options=opts,
     )
     return _extract_content(resp)
 
 
-def _ask_orchestrator(prompt: str) -> str:
+def _ask_orchestrator(prompt: str, **extra_opts) -> str:
     """Send a single prompt to the orchestrator (or domain model in single-LLM mode)."""
+    if _ACTIVE_MODE == "deterministic":
+        raise RuntimeError("LLM calls disabled in deterministic mode")
     if not _HAS_OLLAMA:
         raise ImportError("ollama package not installed")
     model = _resolve_orchestrator_model()
+    opts = {**_DEFAULT_OPTS, **extra_opts}
     resp = _oll.chat(
         model=model,
         messages=[{"role": "user", "content": prompt}],
+        options=opts,
     )
     return _extract_content(resp)
 
@@ -118,6 +129,31 @@ def _safe(fn, *args, fallback: str = "") -> str:
     except Exception as exc:
         logger.warning("LLM helper %s failed: %s", fn.__name__, exc)
         return fallback
+
+
+def _parse_json_response(raw: str, fallback_state: str = "Unknown") -> Dict[str, str]:
+    """Extract a JSON object from an LLM response, tolerating LaTeX and formatting noise."""
+    try:
+        start = raw.index("{")
+        end = raw.rindex("}") + 1
+        snippet = raw[start:end]
+        return json.loads(snippet)
+    except (ValueError, json.JSONDecodeError):
+        pass
+
+    # Regex fallback: pull known fields even when JSON is malformed
+    state_m = re.search(r'"state"\s*:\s*"([^"]+)"', raw)
+    conf_m = re.search(r'"confidence"\s*:\s*"([^"]+)"', raw)
+    reason_m = re.search(r'"reason"\s*:\s*"((?:[^"\\]|\\.)*)"', raw)
+
+    if state_m:
+        return {
+            "state": state_m.group(1),
+            "confidence": conf_m.group(1) if conf_m else "medium",
+            "reason": reason_m.group(1) if reason_m else "",
+        }
+
+    return {"state": fallback_state, "confidence": "low", "reason": "LLM response could not be parsed."}
 
 
 # ─── Domain-expert helpers (astro-agent) ──────────────────────────────────────
@@ -151,20 +187,16 @@ def classify_climate_state(
         "You are an astrophysics classifier. Given the surface temperature "
         "statistics of a planet, classify the climate state as exactly ONE of: "
         "Eyeball, Lobster, Greenhouse, Temperate.\n\n"
-        "Respond ONLY with a JSON object: "
-        '{"state": "...", "confidence": "high|medium|low", "reason": "one sentence"}. '
-        "In the reason field, use LaTeX for quantities (e.g. $T_{mean}$).\n\n"
+        "Respond ONLY with a JSON object — no markdown, no code fences, "
+        "no LaTeX. Use plain text with units (e.g. T_mean = 153 K).\n"
+        'Format: {"state": "...", "confidence": "high|medium|low", '
+        '"reason": "one sentence in plain text"}\n\n'
         f"T_min={T_min:.1f} K, T_max={T_max:.1f} K, T_mean={T_mean:.1f} K, "
         f"tidally_locked={tidally_locked}"
     )
     raw = _safe(_ask_domain, prompt,
                 fallback='{"state": "Unknown", "confidence": "low", "reason": "LLM unavailable"}')
-    try:
-        start = raw.index("{")
-        end = raw.rindex("}") + 1
-        return json.loads(raw[start:end])
-    except (ValueError, json.JSONDecodeError):
-        return {"state": "Unknown", "confidence": "low", "reason": raw[:200]}
+    return _parse_json_response(raw, fallback_state="Unknown")
 
 
 def review_elm_output(
@@ -294,14 +326,19 @@ def generate_adql_query(natural_language: str) -> str:
         "You are an expert in ADQL (Astronomical Data Query Language). "
         "Convert the following natural-language question into a valid "
         "ADQL query for the NASA Exoplanet Archive table `pscomppars`.\n\n"
-        "Available columns include: pl_name, pl_radj (R_Jupiter), "
+        "ONLY these columns exist in pscomppars: pl_name, pl_radj (R_Jupiter), "
         "pl_bmassj (M_Jupiter), pl_orbsmax (AU), pl_orbper (days), "
         "pl_insol (S_Earth), pl_eqt (K), pl_dens (g/cm3), "
         "st_teff (K), st_rad (R_sun), st_lum (log L_sun), st_mass (M_sun), "
         "sy_dist (pc), disc_year, discoverymethod.\n\n"
         "IMPORTANT RULES:\n"
+        "- NEVER reference columns not listed above (e.g. ESI, habitable, "
+        "habitability, HZ, score do NOT exist as columns)\n"
         "- To search by planet name use: WHERE pl_name LIKE '%<name>%'\n"
-        "- pl_radj is in Jupiter radii, pl_bmassj is in Jupiter masses\n"
+        "- pl_radj is in Jupiter radii (Earth ~ 0.089 Rj), "
+        "pl_bmassj is in Jupiter masses (Earth ~ 0.003 Mj)\n"
+        "- For habitability, filter on: pl_eqt BETWEEN 200 AND 320, "
+        "pl_insol BETWEEN 0.2 AND 1.8, pl_radj < 0.2\n"
         "- Always include pl_name in the SELECT\n"
         "- Return ONLY the SQL query, no explanation or markdown\n\n"
         "Examples:\n"
@@ -313,12 +350,36 @@ def generate_adql_query(natural_language: str) -> str:
         "A: SELECT pl_name, pl_radj, disc_year, discoverymethod "
         "FROM pscomppars WHERE discoverymethod = 'Transit' "
         "AND disc_year > 2020\n\n"
+        "Q: find 3 most habitable exoplanets\n"
+        "A: SELECT TOP 3 pl_name, pl_radj, pl_bmassj, pl_orbsmax, pl_insol, "
+        "pl_eqt, st_teff, st_rad, sy_dist "
+        "FROM pscomppars WHERE pl_eqt BETWEEN 200 AND 320 "
+        "AND pl_insol BETWEEN 0.2 AND 1.8 AND pl_radj < 0.2 "
+        "AND pl_eqt IS NOT NULL AND pl_insol IS NOT NULL "
+        "AND pl_radj IS NOT NULL ORDER BY pl_insol ASC\n\n"
         f"Q: {natural_language}\nA: "
     )
     raw = _safe(_ask_orchestrator, prompt, fallback="")
     clean = raw.strip().strip("`").strip()
     if clean.lower().startswith("sql"):
         clean = clean[3:].strip()
+
+    _VALID_COLS = {
+        "pl_name", "pl_radj", "pl_bmassj", "pl_orbsmax", "pl_orbper",
+        "pl_insol", "pl_eqt", "pl_dens", "st_teff", "st_rad", "st_lum",
+        "st_mass", "sy_dist", "disc_year", "discoverymethod",
+    }
+    tokens = re.findall(r"\b([a-z][a-z_]+[a-z0-9])\b", clean.lower())
+    _SQL_KEYWORDS = {
+        "select", "from", "where", "and", "or", "not", "order", "by",
+        "asc", "desc", "limit", "top", "between", "like", "null", "is",
+        "pscomppars", "transit", "radial", "velocity", "imaging",
+    }
+    bad_cols = {t for t in tokens if t not in _VALID_COLS and t not in _SQL_KEYWORDS}
+    if bad_cols:
+        logger.warning("ADQL query contains invalid columns: %s — rejecting", bad_cols)
+        return ""
+
     return clean
 
 
