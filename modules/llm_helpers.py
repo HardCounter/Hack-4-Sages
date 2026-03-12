@@ -93,6 +93,8 @@ _DEFAULT_OPTS = {"num_predict": 2048, "temperature": 0.4}
 
 def _ask_domain(prompt: str, **extra_opts) -> str:
     """Send a single prompt to the AstroSage domain expert."""
+    if _ACTIVE_MODE == "deterministic":
+        raise RuntimeError("LLM calls disabled in deterministic mode")
     if not _HAS_OLLAMA:
         raise ImportError("ollama package not installed")
     opts = {**_DEFAULT_OPTS, **extra_opts}
@@ -106,6 +108,8 @@ def _ask_domain(prompt: str, **extra_opts) -> str:
 
 def _ask_orchestrator(prompt: str, **extra_opts) -> str:
     """Send a single prompt to the orchestrator (or domain model in single-LLM mode)."""
+    if _ACTIVE_MODE == "deterministic":
+        raise RuntimeError("LLM calls disabled in deterministic mode")
     if not _HAS_OLLAMA:
         raise ImportError("ollama package not installed")
     model = _resolve_orchestrator_model()
@@ -322,14 +326,19 @@ def generate_adql_query(natural_language: str) -> str:
         "You are an expert in ADQL (Astronomical Data Query Language). "
         "Convert the following natural-language question into a valid "
         "ADQL query for the NASA Exoplanet Archive table `pscomppars`.\n\n"
-        "Available columns include: pl_name, pl_radj (R_Jupiter), "
+        "ONLY these columns exist in pscomppars: pl_name, pl_radj (R_Jupiter), "
         "pl_bmassj (M_Jupiter), pl_orbsmax (AU), pl_orbper (days), "
         "pl_insol (S_Earth), pl_eqt (K), pl_dens (g/cm3), "
         "st_teff (K), st_rad (R_sun), st_lum (log L_sun), st_mass (M_sun), "
         "sy_dist (pc), disc_year, discoverymethod.\n\n"
         "IMPORTANT RULES:\n"
+        "- NEVER reference columns not listed above (e.g. ESI, habitable, "
+        "habitability, HZ, score do NOT exist as columns)\n"
         "- To search by planet name use: WHERE pl_name LIKE '%<name>%'\n"
-        "- pl_radj is in Jupiter radii, pl_bmassj is in Jupiter masses\n"
+        "- pl_radj is in Jupiter radii (Earth ~ 0.089 Rj), "
+        "pl_bmassj is in Jupiter masses (Earth ~ 0.003 Mj)\n"
+        "- For habitability, filter on: pl_eqt BETWEEN 200 AND 320, "
+        "pl_insol BETWEEN 0.2 AND 1.8, pl_radj < 0.2\n"
         "- Always include pl_name in the SELECT\n"
         "- Return ONLY the SQL query, no explanation or markdown\n\n"
         "Examples:\n"
@@ -341,12 +350,36 @@ def generate_adql_query(natural_language: str) -> str:
         "A: SELECT pl_name, pl_radj, disc_year, discoverymethod "
         "FROM pscomppars WHERE discoverymethod = 'Transit' "
         "AND disc_year > 2020\n\n"
+        "Q: find 3 most habitable exoplanets\n"
+        "A: SELECT TOP 3 pl_name, pl_radj, pl_bmassj, pl_orbsmax, pl_insol, "
+        "pl_eqt, st_teff, st_rad, sy_dist "
+        "FROM pscomppars WHERE pl_eqt BETWEEN 200 AND 320 "
+        "AND pl_insol BETWEEN 0.2 AND 1.8 AND pl_radj < 0.2 "
+        "AND pl_eqt IS NOT NULL AND pl_insol IS NOT NULL "
+        "AND pl_radj IS NOT NULL ORDER BY pl_insol ASC\n\n"
         f"Q: {natural_language}\nA: "
     )
     raw = _safe(_ask_orchestrator, prompt, fallback="")
     clean = raw.strip().strip("`").strip()
     if clean.lower().startswith("sql"):
         clean = clean[3:].strip()
+
+    _VALID_COLS = {
+        "pl_name", "pl_radj", "pl_bmassj", "pl_orbsmax", "pl_orbper",
+        "pl_insol", "pl_eqt", "pl_dens", "st_teff", "st_rad", "st_lum",
+        "st_mass", "sy_dist", "disc_year", "discoverymethod",
+    }
+    tokens = re.findall(r"\b([a-z][a-z_]+[a-z0-9])\b", clean.lower())
+    _SQL_KEYWORDS = {
+        "select", "from", "where", "and", "or", "not", "order", "by",
+        "asc", "desc", "limit", "top", "between", "like", "null", "is",
+        "pscomppars", "transit", "radial", "velocity", "imaging",
+    }
+    bad_cols = {t for t in tokens if t not in _VALID_COLS and t not in _SQL_KEYWORDS}
+    if bad_cols:
+        logger.warning("ADQL query contains invalid columns: %s — rejecting", bad_cols)
+        return ""
+
     return clean
 
 

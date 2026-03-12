@@ -311,17 +311,24 @@ with tab_agent:
             st.session_state.chat_history.append({"role": "assistant", "content": answer})
             st.session_state["_last_agent_steps"] = steps
 
-            # Proactive suggestions (LLM-generated via Qwen)
+            # Proactive suggestions (LLM-generated via Qwen, or static fallback)
             st.markdown("---")
             st.markdown("**Suggested next steps:**")
-            try:
-                from modules.llm_helpers import generate_smart_suggestions
-                convo_summary = "\n".join(
-                    f"{m['role']}: {m['content'][:200]}"
-                    for m in st.session_state.chat_history[-6:]
-                )
-                suggestions = generate_smart_suggestions(convo_summary)
-            except Exception:
+            if st.session_state["llm_mode"] != "deterministic":
+                try:
+                    from modules.llm_helpers import generate_smart_suggestions
+                    convo_summary = "\n".join(
+                        f"{m['role']}: {m['content'][:200]}"
+                        for m in st.session_state.chat_history[-6:]
+                    )
+                    suggestions = generate_smart_suggestions(convo_summary)
+                except Exception:
+                    suggestions = [
+                        "Run a climate simulation for this planet",
+                        "Compare with Earth",
+                        "Find similar planets in the catalog",
+                    ]
+            else:
                 suggestions = [
                     "Run a climate simulation for this planet",
                     "Compare with Earth",
@@ -909,50 +916,51 @@ with tab_manual:
             st.plotly_chart(fig, use_container_width=True)
 
             # ── AI Interpretation & Physics Review (dual-LLM) ─────────
-            with st.expander("AI Interpretation", expanded=False):
-                try:
-                    from modules.llm_helpers import (
-                        classify_climate_state,
-                        interpret_simulation,
-                        review_elm_output,
-                    )
-                    with st.spinner("Domain expert interpreting results..."):
-                        interp = interpret_simulation(d)
-                    st.markdown(sanitize_latex(interp))
-
-                    with st.spinner("Classifying climate state..."):
-                        tmap = st.session_state.temperature_map
-                        cls = classify_climate_state(
-                            float(tmap.min()), float(tmap.max()),
-                            float(tmap.mean()), locked,
+            if st.session_state["llm_mode"] != "deterministic":
+                with st.expander("AI Interpretation", expanded=False):
+                    try:
+                        from modules.llm_helpers import (
+                            classify_climate_state,
+                            interpret_simulation,
+                            review_elm_output,
                         )
-                    state_climate = cls.get("state", "Unknown")
-                    st.info(
-                        f"**Climate state:** {state_climate} "
-                        f"({cls.get('confidence', '?')} confidence)\n\n"
-                        f"{cls.get('reason', '')}"
-                    )
+                        with st.spinner("Domain expert interpreting results..."):
+                            interp = interpret_simulation(d)
+                        st.markdown(sanitize_latex(interp))
 
-                    with st.spinner("Physics plausibility review..."):
-                        params_for_review = {
-                            "star_teff": star_teff, "star_radius": star_radius,
-                            "planet_radius": planet_radius, "planet_mass": planet_mass,
-                            "semi_major": semi_major, "albedo": albedo,
-                            "tidally_locked": locked,
-                        }
-                        review = review_elm_output(
-                            params_for_review,
-                            float(tmap.min()), float(tmap.max()), float(tmap.mean()),
+                        with st.spinner("Classifying climate state..."):
+                            tmap = st.session_state.temperature_map
+                            cls = classify_climate_state(
+                                float(tmap.min()), float(tmap.max()),
+                                float(tmap.mean()), locked,
+                            )
+                        state_climate = cls.get("state", "Unknown")
+                        st.info(
+                            f"**Climate state:** {state_climate} "
+                            f"({cls.get('confidence', '?')} confidence)\n\n"
+                            f"{cls.get('reason', '')}"
                         )
-                    review = sanitize_latex(review)
-                    if review.lower().startswith("plausible"):
-                        st.success(f"⬢ {review}")
-                    elif review.lower().startswith("warning"):
-                        st.warning(review)
-                    else:
-                        st.info(review)
-                except Exception as exc:
-                    st.caption(f"*AI interpretation unavailable — {exc}*")
+
+                        with st.spinner("Physics plausibility review..."):
+                            params_for_review = {
+                                "star_teff": star_teff, "star_radius": star_radius,
+                                "planet_radius": planet_radius, "planet_mass": planet_mass,
+                                "semi_major": semi_major, "albedo": albedo,
+                                "tidally_locked": locked,
+                            }
+                            review = review_elm_output(
+                                params_for_review,
+                                float(tmap.min()), float(tmap.max()), float(tmap.mean()),
+                            )
+                        review = sanitize_latex(review)
+                        if review.lower().startswith("plausible"):
+                            st.success(f"⬢ {review}")
+                        elif review.lower().startswith("warning"):
+                            st.warning(review)
+                        else:
+                            st.info(review)
+                    except Exception as exc:
+                        st.caption(f"*AI interpretation unavailable — {exc}*")
         else:
             st.info("Adjust parameters and press **Run Simulation** (or enable live mode).")
 
@@ -986,7 +994,7 @@ with tab_catalog:
                 nl_results = None
 
         # If no name match, fall back to LLM-generated ADQL
-        if nl_results is None:
+        if nl_results is None and st.session_state["llm_mode"] != "deterministic":
             try:
                 with st.spinner("Translating to ADQL\u2026"):
                     adql = generate_adql_query(nl_query)
@@ -1034,14 +1042,14 @@ with tab_catalog:
                 row = get_planet_data(st.session_state["selected_planet"])
                 if row is not None:
                     raw_dict = row.to_dict()
-                    # Domain-expert summary instead of raw JSON
-                    try:
-                        from modules.llm_helpers import summarise_planet_data
-                        with st.spinner("Domain expert summarising..."):
-                            summary = summarise_planet_data(raw_dict)
-                        st.markdown(sanitize_latex(summary))
-                    except Exception:
-                        pass
+                    if st.session_state["llm_mode"] != "deterministic":
+                        try:
+                            from modules.llm_helpers import summarise_planet_data
+                            with st.spinner("Domain expert summarising..."):
+                                summary = summarise_planet_data(raw_dict)
+                            st.markdown(sanitize_latex(summary))
+                        except Exception:
+                            pass
                     with st.expander("Raw data"):
                         st.json(raw_dict)
                 else:
@@ -1248,23 +1256,24 @@ with tab_science:
 
         # ── Scientific Narrative (domain expert) — full-width card ──
         _narrative_text = ""
-        try:
-            from modules.llm_helpers import narrate_science_panel
-            with st.spinner("Domain expert writing scientific narrative..."):
-                equator = tmap[tmap.shape[0] // 2, :]
-                cs_stats = {
-                    "T_min_equator": float(equator.min()),
-                    "T_max_equator": float(equator.max()),
-                    "T_mean_equator": float(equator.mean()),
-                    "gradient_K": float(equator.max() - equator.min()),
-                }
-                _narrative_text = narrate_science_panel(
-                    hz_data=hz,
-                    cross_section_stats=cs_stats,
-                    uncertainty_note="ELM ensemble std-dev or +/-15 K analytical uncertainty",
-                )
-        except Exception:
-            pass
+        if st.session_state["llm_mode"] != "deterministic":
+            try:
+                from modules.llm_helpers import narrate_science_panel
+                with st.spinner("Domain expert writing scientific narrative..."):
+                    equator = tmap[tmap.shape[0] // 2, :]
+                    cs_stats = {
+                        "T_min_equator": float(equator.min()),
+                        "T_max_equator": float(equator.max()),
+                        "T_mean_equator": float(equator.mean()),
+                        "gradient_K": float(equator.max() - equator.min()),
+                    }
+                    _narrative_text = narrate_science_panel(
+                        hz_data=hz,
+                        cross_section_stats=cs_stats,
+                        uncertainty_note="ELM ensemble std-dev or +/-15 K analytical uncertainty",
+                    )
+            except Exception:
+                pass
 
         # ── Precompute data for all science cards ──
         _isa_data = None
@@ -1511,7 +1520,9 @@ with tab_science:
         with row5_left:
             with st.container(border=True):
                 st.subheader("Compare with Earth")
-                if st.button("Compare with Earth"):
+                if st.session_state["llm_mode"] == "deterministic":
+                    st.caption("*AI comparison disabled in Deterministic mode.*")
+                elif st.button("Compare with Earth"):
                     try:
                         from modules.llm_helpers import compare_planets
                         earth_params = {
