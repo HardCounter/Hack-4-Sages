@@ -509,9 +509,9 @@ CITATION POLICY
 
 FORMATTING
 - Use LaTeX math notation for all equations, variables, and physical quantities.
-- Use $...$ for inline math (e.g. $T_{eq} = 255\\,\\text{K}$, $R = 1.2\\,R_{\\oplus}$).
+- Use $...$ for inline math (e.g. $T_{{eq}} = 255\\,\\text{{K}}$, $R = 1.2\\,R_{{\\oplus}}$).
 - Use $$...$$ for standalone equations (e.g. the equilibrium temperature formula).
-- Common symbols: $R_{\\oplus}$, $M_{\\oplus}$, $L_{\\odot}$, $T_{eq}$, $a$ (semi-major axis).
+- Common symbols: $R_{{\\oplus}}$, $M_{{\\oplus}}$, $L_{{\\odot}}$, $T_{{eq}}$, $a$ (semi-major axis).
 - Do NOT wrap math in markdown code fences; use dollar-sign delimiters only.
 
 RULES
