@@ -20,7 +20,8 @@ A real-time, browser-based climate-surrogate explorer for exoplanets, inspired b
 - **Anomaly detection** — Isolation Forest identifies statistically unusual planets in the NASA catalog; UMAP provides 2-D population visualization.
 - **Augment data** — a CTGAN synthesises thousands of physically plausible habitable-planet configurations to fix the extreme class imbalance in real catalogs.
 - **3-D visualisation** — interactive Plotly globe with rotation animation, scientific colour-mapping, host-star marker, and 2-D heatmap fallback.
-- **LLM agent** — a LangChain agent with configurable single-LLM or dual-LLM mode (Qwen 2.5 orchestrator + astro-specialist), multi-turn memory, 11 tools, and optional domain-expert consultation.
+- **LLM agent** — a LangChain agent with configurable single-LLM or dual-LLM mode (Qwen 2.5-14B orchestrator + AstroSage-Llama-3.1-8B domain expert), multi-turn memory, 11 tools, and autonomous domain-expert consultation.
+- **AstroSage domain expert** — a fine-tuned astrophysics LLM ([AstroMLab/AstroSage-Llama-3.1-8B](https://huggingface.co/AstroMLab/AstroSage-Llama-3.1-8B-GGUF)) that interprets simulation results, classifies climate states, reviews physics plausibility, and provides scientific narratives. It never computes physics itself — it reads deterministic tool outputs.
 - **RAG citations** — ChromaDB vector store of 40 peer-reviewed astrophysics papers; the agent cites real literature to support claims.
 - **Physics guardrails** — Pydantic validators reject any output that violates thermodynamic or astrophysical constraints.
 - **Graceful degradation** — every module has a fallback path so the app never crashes.
@@ -30,8 +31,8 @@ A real-time, browser-based climate-surrogate explorer for exoplanets, inspired b
 | Profile | What it needs | What works |
 |---------|--------------|------------|
 | **Deterministic** | Python + pip dependencies | Physics, ELM surrogate, PINNFormer, visualization, CSV export |
-| **Single-LLM** | + Ollama + astro-agent model (~4.5 GB) | + AI narratives, chat agent, ADQL generation (one LLM) |
-| **Dual-LLM** | + Ollama + Qwen 2.5-14B (~9 GB) + astro-agent | + Separate orchestrator and domain expert (recommended for demos) |
+| **Single-LLM** | + Ollama + AstroSage-8B (~5 GB) | + AI narratives, chat agent, ADQL generation (AstroSage handles both roles) |
+| **Dual-LLM** | + Ollama + Qwen 2.5-14B (~9 GB) + AstroSage-8B (~5 GB) | + Separate orchestrator and domain expert (recommended for demos) |
 
 Select the mode in the **System** tab. The app degrades gracefully: if Ollama is unavailable, all physics/ML tools remain functional.
 
@@ -89,21 +90,30 @@ pip install -r requirements.txt
 
 Download Ollama from <https://ollama.com/download> and install it.
 
+The system uses **two LLM models** served via Ollama:
+
+| Model | Role | Base | VRAM |
+|-------|------|------|------|
+| `qwen2.5:14b` | Orchestrator — tool calling, routing, synthesis | Qwen 2.5-14B | ~9 GB |
+| `astrosage` | Domain expert — interpretation, classification, scientific narratives | [AstroSage-Llama-3.1-8B](https://huggingface.co/AstroMLab/AstroSage-Llama-3.1-8B-GGUF) (Q5_K_M GGUF) | ~5 GB |
+
 ```bash
-# Pull the primary agent model (~9 GB)
+# Pull the orchestrator model (~9 GB)
 ollama pull qwen2.5:14b
 
-# (Optional) Pull a lighter backup model (~4.5 GB)
-ollama pull qwen2.5:7b
+# Create the AstroSage domain-expert model from the included Modelfile
+# This downloads the AstroMLab/AstroSage-Llama-3.1-8B-GGUF weights automatically
+ollama create astrosage -f Modelfile.astrosage
 
-# Create the astro-specialist model from the included Modelfile
-ollama create astro-agent -f Modelfile.astro
-
-# Verify
+# Verify both models are available
 ollama list
 ```
 
+**For Single-LLM mode** (lower VRAM): skip the `qwen2.5:14b` pull — AstroSage handles both orchestration and domain expertise.
+
 Ollama automatically starts a local API server on `http://localhost:11434`. On NVIDIA GPUs it uses the CUDA backend by default.
+
+> **Note:** `Modelfile.astro` is a legacy file that creates a Qwen 2.5-based model with a system prompt. It is **not** used by the current codebase. The code expects `qwen2.5:14b` (raw) and `astrosage` (from `Modelfile.astrosage`).
 
 ### 4. Train the models
 
@@ -207,7 +217,8 @@ model = train_1d_pinn(epochs=10000)
 Hack-4-Sages/
 ├── app.py                      # Streamlit application (5 tabs)
 ├── requirements.txt            # Python dependencies
-├── Modelfile.astro             # Ollama custom model config
+├── Modelfile.astro             # Ollama model config (legacy, not used by code)
+├── Modelfile.astrosage         # Ollama model config — AstroSage domain expert
 ├── Dockerfile                  # Container deployment
 ├── METHODOLOGY.md              # Full scientific methodology document
 ├── train_models.py             # One-shot training script
@@ -217,19 +228,23 @@ Hack-4-Sages/
 │   ├── validators.py           # Pydantic physics guardrails
 │   ├── elm_surrogate.py        # ELM ensemble with conformal prediction
 │   ├── data_augmentation.py    # CTGAN augmentation pipeline
-│   ├── agent_setup.py          # LangChain dual-model agent (8 tools)
+│   ├── agent_setup.py          # LangChain dual-model agent (11 tools)
 │   ├── llm_helpers.py          # Standalone LLM helpers for each tab
-│   ├── rag_citations.py        # RAG with ChromaDB + 15 paper abstracts
+│   ├── rag_citations.py        # RAG with ChromaDB + 40 paper abstracts
 │   ├── anomaly_detection.py    # Isolation Forest + UMAP
 │   ├── visualization.py        # Plotly 3-D globe (rotation), 2-D heatmap, HZ
 │   ├── degradation.py          # Graceful-degradation manager
 │   ├── pinnformer3d.py         # PINNFormer 3-D (PyTorch)
 │   └── pinn_heat.py            # DeepXDE 1-D PINN fallback
-├── tests/                      # pytest test suite (43 tests)
+├── tests/                      # pytest test suite (72 tests)
 │   ├── test_astro_physics.py   # Physics engine tests
-│   ├── test_validators.py      # Pydantic guardrail tests
+│   ├── test_ctgan_physics.py   # CTGAN physical filters and stats
+│   ├── test_degradation_and_modes.py  # Degradation + agent modes
+│   ├── test_elm_gcm_evaluation.py     # ELM vs GCM benchmarks
 │   ├── test_elm_surrogate.py   # ELM + conformal prediction tests
-│   └── test_rag_citations.py   # RAG citation tests
+│   ├── test_pinn_validation.py # PINNFormer physics validation
+│   ├── test_rag_citations.py   # RAG citation tests
+│   └── test_validators.py      # Pydantic guardrail tests
 ├── models/                     # Trained model weights (.pkl, .pt)
 ├── data/nasa_cache/            # Cached NASA query results
 ├── notebooks/                  # Exploration notebooks
@@ -262,8 +277,9 @@ python -m pytest tests/ -v
 | Layer | Technology |
 |-------|-----------|
 | Frontend | Streamlit |
-| LLM hosting | Ollama (CUDA) |
-| Agent framework | LangChain |
+| LLM orchestrator | Ollama — Qwen 2.5-14B |
+| LLM domain expert | Ollama — AstroSage-Llama-3.1-8B (AstroMLab) |
+| Agent framework | LangChain (11 tools, ReAct) |
 | Climate surrogate | ELM (scikit-elm / NumPy) with conformal prediction |
 | Data augmentation | CTGAN |
 | Anomaly detection | Isolation Forest + UMAP |
@@ -272,4 +288,4 @@ python -m pytest tests/ -v
 | Validation | Pydantic |
 | Visualisation | Plotly |
 | Data source | NASA Exoplanet Archive (TAP) |
-| Testing | pytest (43 tests) |
+| Testing | pytest (72 tests) |
