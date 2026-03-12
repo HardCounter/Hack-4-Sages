@@ -1,4 +1,4 @@
-FROM qwen2.5:14b
+FROM hf.co/AstroMLab/AstroSage-Llama-3.1-8B-GGUF:Q5_K_M
 
 PARAMETER temperature 0.3
 PARAMETER top_p 0.9
