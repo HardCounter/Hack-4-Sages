@@ -69,7 +69,7 @@ The **Autonomous Exoplanetary Digital Twin** is a browser-based climate-surrogat
 | Data augmentation | CTGAN for habitable planet oversampling |
 | Anomaly detection | Isolation Forest + UMAP visualization |
 | Scientific citations | Hybrid RAG over 40 peer-reviewed papers (ChromaDB + TF-IDF RRF) |
-| Natural language interface | Dual-model LangChain agent (Qwen 2.5 + astro-agent) |
+| Natural language interface | Dual-model LangChain agent (Qwen 2.5-14B + AstroSage-8B) |
 | 3D visualization | Plotly globe with temperature mapping |
 | Input validation | Pydantic physics guardrails |
 | Fault tolerance | Multi-level graceful degradation |
@@ -185,10 +185,10 @@ The system follows a layered architecture with five distinct layers:
 │                    ORCHESTRATION LAYER                       │
 │              LangChain AgentExecutor (ReAct)                 │
 │   ┌────────────────┐    ┌──────────────────┐                │
-│   │  Qwen 2.5-14B  │    │  astro-agent     │                │
+│   │  Qwen 2.5-14B  │    │  AstroSage-8B    │                │
 │   │  (Orchestrator) │◄──►│  (Domain Expert) │                │
 │   └────────────────┘    └──────────────────┘                │
-│              8 tools registered for function calling         │
+│              11 tools registered for function calling        │
 └──────────────────────┬──────────────────────────────────────┘
                        │
 ┌──────────────────────┴──────────────────────────────────────┐
@@ -225,7 +225,7 @@ The system uses two LLM instances via Ollama:
 
 1. **Qwen 2.5-14B (Orchestrator):** General-purpose model with tool-calling capability. Decides which tools to invoke, sequences multi-step analyses, and synthesizes final answers.
 
-2. **astro-agent (Domain Expert):** Same Qwen 2.5 base model but with a specialized astrophysics system prompt baked via `Modelfile.astro`. Interprets raw numerical results, classifies climate states, reviews physics plausibility, and provides scientific narratives.
+2. **astrosage (Domain Expert):** AstroSage-Llama-3.1-8B (AstroMLab, Q5_K_M GGUF) — a fine-tuned astrophysics LLM served via `Modelfile.astrosage`. Interprets raw numerical results, classifies climate states, reviews physics plausibility, and provides scientific narratives.
 
 The orchestrator always consults the domain expert after computing metrics — raw numbers are never presented without expert interpretation.
 
@@ -263,7 +263,7 @@ The orchestrator always consults the domain expert after computing metrics — r
 
 ### 5.1 Main Application (`app.py`)
 
-**Lines:** 751 | **Role:** Streamlit entry point
+**Lines:** ~1,739 | **Role:** Streamlit entry point
 
 The application is organized into 5 tabs with a cosmic dark theme (custom CSS with Space Grotesk and Orbitron fonts, dark radial gradient background).
 
@@ -281,7 +281,7 @@ The application is organized into 5 tabs with a cosmic dark theme (custom CSS wi
 
 ### 5.2 Astrophysics Engine (`astro_physics.py`)
 
-**Lines:** 429 | **Role:** Core physics calculations
+**Lines:** ~805 | **Role:** Core physics calculations
 
 This is the scientific backbone of the project, implementing peer-reviewed formulations:
 
@@ -311,11 +311,11 @@ This is the scientific backbone of the project, implementing peer-reviewed formu
 
 ### 5.3 LLM Agent System (`agent_setup.py`)
 
-**Lines:** 439 | **Role:** LangChain agent with 8 tools
+**Lines:** ~555 | **Role:** LangChain agent with 11 tools
 
-Uses `create_tool_calling_agent` with a ReAct-style loop (max 10 iterations). Both LLMs connect to Ollama at `http://localhost:11434`.
+Uses `create_tool_calling_agent` with a ReAct-style loop (max 7 iterations in dual-LLM mode, max 5 in single-LLM mode). Both LLMs connect to Ollama at `http://localhost:11434`.
 
-**8 Registered Tools:**
+**11 Registered Tools:**
 
 | Tool | Description | Multi-step? |
 |---|---|---|
@@ -326,6 +326,9 @@ Uses `create_tool_calling_agent` with a ReAct-style loop (max 10 iterations). Bo
 | `discover_most_habitable` | NASA → rank by ESI → expert evaluation | Yes (3 steps) |
 | `compare_two_planets` | Fetch 2 planets → compute → expert comparison | Yes (3 steps) |
 | `detect_anomalous_planets` | NASA → Isolation Forest → top anomalies | Yes (2 steps) |
+| `classify_planet_radius_gap` | Fulton Gap classification (rocky / gap / sub-Neptune / giant) | No |
+| `predict_sulfur_chemistry` | Sulfur speciation prediction (H₂SO₄ / SO₂ / H₂S) | No |
+| `assess_carbon_oxygen_ratio` | C/O ratio habitability assessment | No |
 | `cite_scientific_literature` | Hybrid RAG (semantic + TF-IDF RRF) → 40-paper corpus → formatted references with key findings; accepts optional topic filter tags | No |
 
 **System prompt enforces a procedure:**
@@ -544,8 +547,8 @@ Three Pydantic models enforce physical constraints:
 - mass_solar: 0.08–150 M☉
 
 **`PlanetaryParameters`:**
-- radius_earth: 0.1–25 R⊕
-- mass_earth: 0.01–13000 M⊕ (optional)
+- radius_earth: 0.3–25 R⊕
+- mass_earth: < 4,132 M⊕ (deuterium-burning limit ≈ 13 M_Jup, optional)
 - semi_major_axis: 0.001–1000 AU
 - albedo: 0.0–1.0
 - Mass-radius consistency check using Chen & Kipping 2017 power law
@@ -563,10 +566,16 @@ These prevent physically impossible inputs from propagating through the pipeline
 
 `GracefulDegradation` class provides `run_with_fallback(primary, fallback, timeout, label)` — attempts the primary function with a timeout, falls back on failure.
 
-`run_simulation_pipeline()` implements a 3-tier fallback chain:
-1. **ELM ensemble** → 2D temperature map (preferred)
-2. **Analytical eyeball model** → Simplified radiative map (fallback)
-3. **3D globe** → 2D heatmap (rendering fallback)
+`run_simulation_pipeline()` implements a multi-level fallback chain:
+
+| Level | Trigger | Fallback |
+|-------|---------|----------|
+| L0 | Full mode | Dual-LLM / Single-LLM / Deterministic |
+| L0b | Ollama unavailable | Deterministic mode (no AI narratives) |
+| L1 | LLM unavailable | Deterministic tools only |
+| L2 | ELM unphysical output | PINNFormer 3-D → analytical cos^{1/4} |
+| L3 | 3-D render timeout | 2-D heatmap |
+| L4 | CTGAN fails | NASA-only data |
 
 Also includes `validate_temperature_map()` to reject maps with NaN, infinite values, or physically unreasonable temperatures (< 2.7 K CMB floor or > 5000 K).
 
@@ -582,10 +591,10 @@ python train_models.py --ctgan --pinn     # All models
 ```
 
 **CLI arguments:**
-- `--elm-samples` (default: 2000) — Training samples for ELM
+- `--elm-samples` (default: 5000) — Training samples for ELM
 - `--elm-neurons` (default: 500) — Hidden neurons per ELM
 - `--elm-models` (default: 10) — Ensemble size
-- `--ctgan-epochs` (default: 300) — CTGAN training epochs
+- `--ctgan-epochs` (default: 600) — CTGAN training epochs
 - `--pinn-epochs` (default: 5000) — PINNFormer training epochs
 
 Outputs are saved to `models/` directory.
@@ -715,7 +724,7 @@ The METHODOLOGY.md file contains 17 peer-reviewed references from journals inclu
 
 | Property | Value |
 |---|---|
-| Architecture | PyTorch TransformerEncoder (4 heads, 3 layers, d=128) |
+| Architecture | PyTorch TransformerEncoder (4 heads, 4 layers, d=128) |
 | PDE solved | κ ∇²T + S(θ,φ) − σT⁴ = 0 |
 | Input | (θ, φ, z) spherical coordinates |
 | Positional encoding | Wavelet (multi-frequency sinusoidal) |
@@ -729,7 +738,7 @@ The METHODOLOGY.md file contains 17 peer-reviewed references from journals inclu
 | Architecture | Conditional Tabular GAN |
 | Purpose | Oversample habitable-zone planets |
 | Input | NASA catalog columns |
-| Training epochs | Default 300 |
+| Training epochs | Default 600 |
 | Validation | Distribution comparison (real vs synthetic) |
 
 ### 8.4 Isolation Forest (Anomaly Detection)
@@ -812,6 +821,7 @@ python -m venv .venv
 pip install -r requirements.txt
 ollama pull qwen2.5:14b
 ollama create astro-agent -f Modelfile.astro
+ollama create astrosage -f Modelfile.astrosage
 python train_models.py
 streamlit run app.py
 ```
@@ -829,14 +839,24 @@ HEALTHCHECK CMD curl --fail http://localhost:8501/_stcore/health || exit 1
 CMD ["streamlit", "run", "app.py", "--server.port=8501", "--server.address=0.0.0.0"]
 ```
 
-### Ollama Custom Model
+### Ollama Custom Models
 
+**Orchestrator (`Modelfile.astro`):**
 ```
 FROM qwen2.5:14b
 PARAMETER temperature 0.3
 PARAMETER top_p 0.9
 PARAMETER num_ctx 8192
 SYSTEM """You are AstroAgent, an expert astrophysics assistant..."""
+```
+
+**Domain Expert (`Modelfile.astrosage`):**
+```
+FROM hf.co/AstroMLab/AstroSage-Llama-3.1-8B-GGUF:Q5_K_M
+PARAMETER temperature 0.3
+PARAMETER top_p 0.9
+PARAMETER num_ctx 8192
+SYSTEM """You are AstroSage, a domain expert in astrophysics..."""
 ```
 
 ### Hardware Requirements
