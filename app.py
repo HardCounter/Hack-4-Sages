@@ -19,6 +19,8 @@ import pandas as pd
 import plotly.graph_objects as go
 import  streamlit as st
 
+from modules.llm_helpers import sanitize_latex
+
 # ─── Page config (must be first Streamlit call) ──────────────────────────────
 
 st.set_page_config(
@@ -266,7 +268,7 @@ with tab_agent:
 
         for msg in st.session_state.chat_history:
             with st.chat_message(msg["role"]):
-                st.markdown(msg["content"])
+                st.markdown(sanitize_latex(msg["content"]))
 
         if prompt := st.chat_input("Ask about an exoplanet\u2026"):
             audience_hint = {
@@ -302,7 +304,7 @@ with tab_agent:
                     except Exception as exc:
                         answer = f"Agent unavailable: {exc}"
                         steps = []
-                    st.markdown(answer)
+                    st.markdown(sanitize_latex(answer))
 
             st.session_state.chat_history.append({"role": "assistant", "content": answer})
             st.session_state["_last_agent_steps"] = steps
@@ -346,12 +348,12 @@ with tab_agent:
                         'Expert Opinion</strong></div>',
                         unsafe_allow_html=True,
                     )
-                    st.markdown(obs[:800])
+                    st.markdown(sanitize_latex(obs[:800]))
                 else:
                     with st.expander(f"Step {i+1}: {action.tool}", expanded=(i == 0)):
                         st.markdown(f"**Tool:** `{action.tool}`")
                         st.markdown(f"**Input:** `{action.tool_input}`")
-                        st.markdown(f"**Output:** {obs[:500]}")
+                        st.markdown(f"**Output:** {sanitize_latex(obs[:500])}")
         else:
             st.info("Reasoning steps appear here after each agent response.")
 
@@ -914,7 +916,7 @@ with tab_manual:
                     )
                     with st.spinner("Domain expert interpreting results..."):
                         interp = interpret_simulation(d)
-                    st.markdown(interp)
+                    st.markdown(sanitize_latex(interp))
 
                     with st.spinner("Classifying climate state..."):
                         tmap = st.session_state.temperature_map
@@ -940,8 +942,9 @@ with tab_manual:
                             params_for_review,
                             float(tmap.min()), float(tmap.max()), float(tmap.mean()),
                         )
+                    review = sanitize_latex(review)
                     if review.lower().startswith("plausible"):
-                        st.success(f"⬢ {review}")  # raw icon — st.success can't render HTML
+                        st.success(f"⬢ {review}")
                     elif review.lower().startswith("warning"):
                         st.warning(review)
                     else:
@@ -1018,7 +1021,7 @@ with tab_catalog:
                         from modules.llm_helpers import summarise_planet_data
                         with st.spinner("Domain expert summarising..."):
                             summary = summarise_planet_data(raw_dict)
-                        st.markdown(summary)
+                        st.markdown(sanitize_latex(summary))
                     except Exception:
                         pass
                     with st.expander("Raw data"):
@@ -1271,7 +1274,7 @@ with tab_science:
         if _narrative_text:
             with st.container(border=True):
                 st.markdown("### Scientific Narrative")
-                st.markdown(_narrative_text)
+                st.markdown(sanitize_latex(_narrative_text))
 
         # Row 2: HZ diagram | False Positives
         row2_left, row2_right = st.columns(2, gap="medium")
@@ -1500,7 +1503,7 @@ with tab_science:
                         }
                         with st.spinner("Domain expert comparing with Earth..."):
                             comp = compare_planets(d, earth_params)
-                        st.markdown(comp)
+                        st.markdown(sanitize_latex(comp))
                     except Exception:
                         st.caption("*Comparison unavailable (Ollama not running).*")
 

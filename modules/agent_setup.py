@@ -259,11 +259,15 @@ def consult_domain_expert(question: str, context: str = "") -> str:
             results, NASA data) to give the expert more context.
     """
     llm = _get_domain_llm()
-    full_prompt = question
+    latex_hint = (
+        "Use LaTeX math notation for quantities and equations: "
+        "$...$ for inline, $$...$$ for display.\n\n"
+    )
+    full_prompt = latex_hint + question
     if context:
         full_prompt = (
             f"Context data:\n{context}\n\n"
-            f"Question: {question}"
+            f"{latex_hint}Question: {question}"
         )
     response = llm.invoke(full_prompt)
     return response.content
@@ -323,7 +327,8 @@ def discover_most_habitable(top_n: int = 5) -> str:
 
     expert_prompt = (
         "Rank and evaluate these exoplanet candidates for habitability. "
-        "For each planet give one sentence of scientific reasoning.\n\n"
+        "For each planet give one sentence of scientific reasoning. "
+        "Use LaTeX math notation for quantities ($T_{eq}$, $R_{\\oplus}$, etc.).\n\n"
         + json.dumps(top, indent=2)
     )
     expert_opinion = _get_domain_llm().invoke(expert_prompt).content
@@ -369,7 +374,8 @@ def compare_two_planets(planet_a_name: str, planet_b_name: str) -> str:
     expert_prompt = (
         "Compare these two exoplanets in terms of habitability. "
         "Write 4-5 sentences covering temperature, stellar environment, "
-        "size, and overall prospects.\n\n"
+        "size, and overall prospects. "
+        "Use LaTeX math notation for quantities ($T_{eq}$, $R_{\\oplus}$, etc.).\n\n"
         f"Planet A ({planet_a_name}):\n{json.dumps(results[planet_a_name], indent=2, default=str)}\n\n"
         f"Planet B ({planet_b_name}):\n{json.dumps(results[planet_b_name], indent=2, default=str)}"
     )
@@ -500,6 +506,13 @@ CITATION POLICY
 - Use the topics parameter for targeted retrieval when appropriate.
 - Reference key findings from retrieved papers to ground your statements.
 - Cite when relevant — do not force citations where they add no value.
+
+FORMATTING
+- Use LaTeX math notation for all equations, variables, and physical quantities.
+- Use $...$ for inline math (e.g. $T_{eq} = 255\\,\\text{K}$, $R = 1.2\\,R_{\\oplus}$).
+- Use $$...$$ for standalone equations (e.g. the equilibrium temperature formula).
+- Common symbols: $R_{\\oplus}$, $M_{\\oplus}$, $L_{\\odot}$, $T_{eq}$, $a$ (semi-major axis).
+- Do NOT wrap math in markdown code fences; use dollar-sign delimiters only.
 
 RULES
 - Always cite the data source (NASA Exoplanet Archive).

@@ -15,6 +15,7 @@ while dual-LLM mode uses separate models for orchestration vs expertise.
 
 import json
 import logging
+import re
 from typing import Dict, Optional
 
 logger = logging.getLogger(__name__)
@@ -48,6 +49,32 @@ def _resolve_orchestrator_model() -> str:
     if _ACTIVE_MODE == "single_llm":
         return _DOMAIN_MODEL
     return _ORCHESTRATOR_MODEL
+
+
+# ─── LaTeX post-processing ─────────────────────────────────────────────────────
+
+_LATEX_HINT = (
+    "Format physical quantities and equations using LaTeX math notation. "
+    "Use $...$ for inline math (e.g. $T_{eq}$, $R_{\\oplus}$, $L/L_{\\odot}$) "
+    "and $$...$$ for standalone equations.\n\n"
+)
+
+
+def sanitize_latex(text: str) -> str:
+    """Fix common LLM LaTeX issues before rendering with st.markdown()."""
+    text = re.sub(r"```latex\s*\n?(.*?)```", r"$$\1$$", text, flags=re.DOTALL)
+    # \[ ... \] → $$ ... $$ (Streamlit uses dollar-sign delimiters)
+    text = re.sub(r"\\\[\s*", "$$", text)
+    text = re.sub(r"\s*\\\]", "$$", text)
+    # \( ... \) → $ ... $
+    text = re.sub(r"\\\(\s*", "$", text)
+    text = re.sub(r"\s*\\\)", "$", text)
+    # Drop trailing lone $ to avoid rendering glitches
+    inline_count = len(re.findall(r"(?<!\$)\$(?!\$)", text))
+    if inline_count % 2 != 0:
+        idx = text.rfind("$")
+        text = text[:idx] + text[idx + 1:]
+    return text
 
 
 # ─── Low-level callers ────────────────────────────────────────────────────────
@@ -97,7 +124,8 @@ def interpret_simulation(results: Dict) -> str:
         "interpretation. Mention the climate state (Eyeball, Lobster, "
         "Greenhouse, or Temperate), habitability prospects, and key risks. "
         "Use Kelvin for temperatures.\n\n"
-        f"Results:\n{json.dumps(results, indent=2, default=str)}"
+        + _LATEX_HINT
+        + f"Results:\n{json.dumps(results, indent=2, default=str)}"
     )
     return _safe(_ask_domain, prompt,
                  fallback="*AI interpretation unavailable — Ollama not running.*")
@@ -115,7 +143,8 @@ def classify_climate_state(
         "statistics of a planet, classify the climate state as exactly ONE of: "
         "Eyeball, Lobster, Greenhouse, Temperate.\n\n"
         "Respond ONLY with a JSON object: "
-        '{"state": "...", "confidence": "high|medium|low", "reason": "one sentence"}.\n\n'
+        '{"state": "...", "confidence": "high|medium|low", "reason": "one sentence"}. '
+        "In the reason field, use LaTeX for quantities (e.g. $T_{mean}$).\n\n"
         f"T_min={T_min:.1f} K, T_max={T_max:.1f} K, T_mean={T_mean:.1f} K, "
         f"tidally_locked={tidally_locked}"
     )
@@ -140,7 +169,8 @@ def review_elm_output(
         "You are a physics reviewer. Given the input parameters and the "
         "ELM surrogate output below, assess whether the temperature "
         "distribution is physically plausible. Respond in ONE sentence "
-        "starting with either 'Plausible:' or 'Warning:'.\n\n"
+        "starting with either 'Plausible:' or 'Warning:'. "
+        "Use LaTeX math notation for quantities (e.g. $T_{min}$, $T_{max}$).\n\n"
         f"Input: {json.dumps(params, default=str)}\n"
         f"Output: T_min={T_min:.1f} K, T_max={T_max:.1f} K, T_mean={T_mean:.1f} K"
     )
@@ -158,7 +188,8 @@ def summarise_planet_data(planet_data: Dict) -> str:
         "general scientific audience. Mention the planet name, key "
         "parameters (radius, mass, temperature, distance), and one "
         "interesting fact.\n\n"
-        f"Data:\n{json.dumps(planet_data, indent=2, default=str)}"
+        + _LATEX_HINT
+        + f"Data:\n{json.dumps(planet_data, indent=2, default=str)}"
     )
     return _safe(_ask_domain, prompt, fallback="*Summary unavailable.*")
 
@@ -181,7 +212,8 @@ def narrate_science_panel(
         "Mention where the planet sits relative to the HZ boundaries, "
         "describe the day-night temperature gradient, and note the "
         "uncertainty caveats.\n\n"
-        f"HZ boundaries (AU): {json.dumps(hz_data, default=str)}\n"
+        + _LATEX_HINT
+        + f"HZ boundaries (AU): {json.dumps(hz_data, default=str)}\n"
         f"Cross-section stats: {json.dumps(cross_section_stats, default=str)}\n"
         f"Uncertainty: {uncertainty_note}"
     )
@@ -199,7 +231,8 @@ def compare_planets(planet_a: Dict, planet_b: Dict) -> str:
         "of habitability. Write 4-5 sentences covering temperature, "
         "stellar environment, size, and overall habitability prospects. "
         "Be specific with numbers.\n\n"
-        f"Planet A:\n{json.dumps(planet_a, indent=2, default=str)}\n\n"
+        + _LATEX_HINT
+        + f"Planet A:\n{json.dumps(planet_a, indent=2, default=str)}\n\n"
         f"Planet B:\n{json.dumps(planet_b, indent=2, default=str)}"
     )
     return _safe(_ask_domain, prompt, fallback="*Comparison unavailable.*")
