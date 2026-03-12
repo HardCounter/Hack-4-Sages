@@ -157,3 +157,11 @@ UMAP (McInnes et al. 2018) provides 2-D visualization of the planet population.
 15. Shields, A.L. et al. (2016). Physics Reports, 663, 1-38.
 16. Turbet, M. et al. (2016). A&A, 596, A112.
 17. Wordsworth, R. (2015). ApJ, 806, 180.
+
+
+## 13. Video References
+- svs.gsfc.nasa.gov
+- webbtelescope.org/news/multimedia
+- images.nasa.gov
+- eso.org/public/videos/
+- photojournal.jpl.nasa.gov

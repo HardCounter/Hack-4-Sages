@@ -2,6 +2,33 @@
 
 A real-time, browser-based climate-surrogate explorer for exoplanets, inspired by GCM literature and digital-twin concepts. Built for the HACK-4-SAGES hackathon.
 
+## Table of Contents
+
+- [Autonomous Exoplanetary Digital Twin](#autonomous-exoplanetary-digital-twin)
+  - [Table of Contents](#table-of-contents)
+  - [What it does](#what-it-does)
+  - [Runtime Profiles](#runtime-profiles)
+  - [Requirements](#requirements)
+  - [Quick start](#quick-start)
+    - [1. Clone and create a virtual environment](#1-clone-and-create-a-virtual-environment)
+    - [2. Install Python dependencies](#2-install-python-dependencies)
+    - [3. Install and configure Ollama](#3-install-and-configure-ollama)
+    - [4. Train the models](#4-train-the-models)
+    - [5. Launch the application](#5-launch-the-application)
+  - [How to use the app](#how-to-use-the-app)
+    - [Agent AI](#agent-ai)
+    - [Manual Mode](#manual-mode)
+    - [Catalog](#catalog)
+    - [Science](#science)
+    - [System](#system)
+  - [Advanced training options](#advanced-training-options)
+  - [Project structure](#project-structure)
+  - [Docker deployment](#docker-deployment)
+  - [Running tests](#running-tests)
+  - [Tech stack](#tech-stack)
+
+---
+
 > **Scope & Non-Goals:** The ML surrogates (ELM ensemble, PINNFormer 3D) are trained on
 > analytically generated data and are **not** calibrated against full 3-D General
 > Circulation Models (ROCKE-3D, ExoCAM). Outputs are hypothesis-generating
