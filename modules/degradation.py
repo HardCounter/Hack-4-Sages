@@ -79,11 +79,10 @@ class GracefulDegradation:
 
     @staticmethod
     def check_ollama_available() -> bool:
-        """Return True if Ollama is reachable."""
+        """Return True if at least one Ollama host is reachable."""
         try:
-            import ollama as _oll
-            _oll.list()
-            return True
+            from modules.ollama_balancer import get_balancer
+            return any(get_balancer().check_all().values())
         except Exception:
             return False
 
