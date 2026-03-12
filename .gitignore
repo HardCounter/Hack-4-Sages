@@ -281,4 +281,10 @@ $RECYCLE.BIN/
 # Windows shortcuts
 *.lnk
 
+# Cursor IDE
+.cursor/
+
+# GitHub workspace instructions
+.github/
+
 # End of https://www.toptal.com/developers/gitignore/api/windows,linux,python,jupyternotebooks,react,angular
