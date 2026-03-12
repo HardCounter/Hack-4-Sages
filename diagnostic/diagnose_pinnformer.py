@@ -252,7 +252,7 @@ def main() -> None:
         import torch
         from modules.pinnformer3d import (
             load_pinnformer,
-            predict_temperature_map,
+            sample_surface_map,
             train_pinnformer,
             save_pinnformer,
         )
@@ -279,8 +279,8 @@ def main() -> None:
 
     # --- Generate maps ---
     print("Generating PINN temperature map ...")
-    pinn_map = predict_temperature_map(
-        model, n_lat=N_LAT, n_lon=N_LON, z=0.5, device=device,
+    pinn_map = sample_surface_map(
+        model, n_lat=N_LAT, n_lon=N_LON, device=device,
     )
 
     print("Generating analytical eyeball map ...")
