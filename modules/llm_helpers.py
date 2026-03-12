@@ -88,25 +88,32 @@ def _extract_content(resp) -> str:
         return resp["message"]["content"]
 
 
-def _ask_domain(prompt: str) -> str:
+_DEFAULT_OPTS = {"num_predict": 2048, "temperature": 0.4}
+
+
+def _ask_domain(prompt: str, **extra_opts) -> str:
     """Send a single prompt to the AstroSage domain expert."""
     if not _HAS_OLLAMA:
         raise ImportError("ollama package not installed")
+    opts = {**_DEFAULT_OPTS, **extra_opts}
     resp = _oll.chat(
         model=_DOMAIN_MODEL,
         messages=[{"role": "user", "content": prompt}],
+        options=opts,
     )
     return _extract_content(resp)
 
 
-def _ask_orchestrator(prompt: str) -> str:
+def _ask_orchestrator(prompt: str, **extra_opts) -> str:
     """Send a single prompt to the orchestrator (or domain model in single-LLM mode)."""
     if not _HAS_OLLAMA:
         raise ImportError("ollama package not installed")
     model = _resolve_orchestrator_model()
+    opts = {**_DEFAULT_OPTS, **extra_opts}
     resp = _oll.chat(
         model=model,
         messages=[{"role": "user", "content": prompt}],
+        options=opts,
     )
     return _extract_content(resp)
 
@@ -118,6 +125,31 @@ def _safe(fn, *args, fallback: str = "") -> str:
     except Exception as exc:
         logger.warning("LLM helper %s failed: %s", fn.__name__, exc)
         return fallback
+
+
+def _parse_json_response(raw: str, fallback_state: str = "Unknown") -> Dict[str, str]:
+    """Extract a JSON object from an LLM response, tolerating LaTeX and formatting noise."""
+    try:
+        start = raw.index("{")
+        end = raw.rindex("}") + 1
+        snippet = raw[start:end]
+        return json.loads(snippet)
+    except (ValueError, json.JSONDecodeError):
+        pass
+
+    # Regex fallback: pull known fields even when JSON is malformed
+    state_m = re.search(r'"state"\s*:\s*"([^"]+)"', raw)
+    conf_m = re.search(r'"confidence"\s*:\s*"([^"]+)"', raw)
+    reason_m = re.search(r'"reason"\s*:\s*"((?:[^"\\]|\\.)*)"', raw)
+
+    if state_m:
+        return {
+            "state": state_m.group(1),
+            "confidence": conf_m.group(1) if conf_m else "medium",
+            "reason": reason_m.group(1) if reason_m else "",
+        }
+
+    return {"state": fallback_state, "confidence": "low", "reason": "LLM response could not be parsed."}
 
 
 # ─── Domain-expert helpers (astro-agent) ──────────────────────────────────────
@@ -151,20 +183,16 @@ def classify_climate_state(
         "You are an astrophysics classifier. Given the surface temperature "
         "statistics of a planet, classify the climate state as exactly ONE of: "
         "Eyeball, Lobster, Greenhouse, Temperate.\n\n"
-        "Respond ONLY with a JSON object: "
-        '{"state": "...", "confidence": "high|medium|low", "reason": "one sentence"}. '
-        "In the reason field, use LaTeX for quantities (e.g. $T_{mean}$).\n\n"
+        "Respond ONLY with a JSON object — no markdown, no code fences, "
+        "no LaTeX. Use plain text with units (e.g. T_mean = 153 K).\n"
+        'Format: {"state": "...", "confidence": "high|medium|low", '
+        '"reason": "one sentence in plain text"}\n\n'
         f"T_min={T_min:.1f} K, T_max={T_max:.1f} K, T_mean={T_mean:.1f} K, "
         f"tidally_locked={tidally_locked}"
     )
     raw = _safe(_ask_domain, prompt,
                 fallback='{"state": "Unknown", "confidence": "low", "reason": "LLM unavailable"}')
-    try:
-        start = raw.index("{")
-        end = raw.rindex("}") + 1
-        return json.loads(raw[start:end])
-    except (ValueError, json.JSONDecodeError):
-        return {"state": "Unknown", "confidence": "low", "reason": raw[:200]}
+    return _parse_json_response(raw, fallback_state="Unknown")
 
 
 def review_elm_output(
