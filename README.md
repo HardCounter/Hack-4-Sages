@@ -6,6 +6,8 @@ A real-time, browser-based climate-surrogate explorer for exoplanets, inspired b
 
 - [Autonomous Exoplanetary Digital Twin](#autonomous-exoplanetary-digital-twin)
   - [Table of Contents](#table-of-contents)
+  - [System Architecture](#system-architecture)
+  - [Data Flows](#data-flows)
   - [What it does](#what-it-does)
   - [Runtime Profiles](#runtime-profiles)
   - [Requirements](#requirements)
@@ -39,6 +41,106 @@ A real-time, browser-based climate-surrogate explorer for exoplanets, inspired b
 > climate predictions. The system does not implement bidirectional data
 > assimilation and is therefore a *digital-twin-inspired* surrogate, not a
 > classical digital twin.
+
+## System Architecture
+
+```mermaid
+graph TB
+  UI[Presentation Layer\nStreamlit app.py\nAgent AI, Manual, Catalog, Science, System, About]
+
+  ORCH[Orchestration Layer\nLangChain AgentExecutor + tools\nDual-LLM / Single-LLM / Deterministic]
+  LLM1[Qwen 2.5-14B\nOrchestrator]
+  LLM2[AstroSage 8B\nDomain Expert]
+
+  PHYS[Physics and ML Layer]
+  AP[astro_physics.py\nT_eq, ESI, SEPHI, HZ, ISA, biosignature risk]
+  ELM[elm_surrogate.py\nELM ensemble + conformal uncertainty]
+  PINN[pinnformer3d.py\nTransformer PINN surrogate]
+  CTGAN[data_augmentation.py\nCTGAN synthetic planets]
+  ANOM[anomaly_detection.py\nIsolation Forest + UMAP]
+  VIS[visualization.py\n3D globe + 2D heatmap fallback]
+
+  VAL[Validation and Degradation]
+  V1[validators.py\nPydantic guardrails]
+  V2[degradation.py\nL0 to L4 fallback manager]
+
+  DATA[Data Layer]
+  NASA[nasa_client.py\nNASA TAP/ADQL]
+  COMB[combined_catalog.py\nNASA + EU + DACE + Gaia merge]
+  RAG[rag_citations.py\nHybrid semantic + TF-IDF citations]
+
+  UI --> ORCH
+  ORCH --> LLM1
+  ORCH --> LLM2
+  ORCH --> PHYS
+
+  PHYS --> AP
+  PHYS --> ELM
+  PHYS --> PINN
+  PHYS --> CTGAN
+  PHYS --> ANOM
+  PHYS --> VIS
+
+  PHYS --> VAL
+  VAL --> V1
+  VAL --> V2
+
+  PHYS --> DATA
+  DATA --> NASA
+  DATA --> COMB
+  DATA --> RAG
+```
+
+## Data Flows
+
+### 1) User query to simulation output
+
+```mermaid
+graph LR
+  A[User input\nchat prompt or manual sliders] --> B[PlanetaryParameters validation]
+  B --> C[Deterministic physics\nT_eq, flux, ESI, SEPHI, HZ, ISA, biosignature risk]
+  C --> D[SimulationOutput validation]
+  D --> E{Climate model path}
+
+  E -->|Primary| F[ELM ensemble map prediction]
+  E -->|Fallback| G[PINNFormer 3D or analytical cos 1/4 model]
+
+  F --> H[Temperature-map safety checks\nno NaN, no negative, <= 5000 K]
+  G --> H
+
+  H --> I[Visualization\n3D globe or 2D heatmap]
+  I --> J[Interpretation layer\nclassify climate + narrative + review]
+  J --> K[UI cards, plots, exports]
+```
+
+### 2) Catalog ingestion and augmentation pipeline
+
+```mermaid
+graph LR
+  N[NASA TAP] --> M[Schema normalization]
+  E[Exoplanet.eu] --> M
+  D[DACE CHEOPS] --> M
+  G[Gaia DR3] --> M
+
+  M --> C[combined_catalog.py\ndeduplicate with NASA priority]
+  C --> A[Anomaly detection\nIsolation Forest + UMAP]
+  C --> T[CTGAN training\nsynthetic habitable planets]
+  C --> R[RAG context metadata]
+
+  T --> V[Physics filtering + validation]
+  V --> O[Real vs synthetic comparison dashboard]
+```
+
+### 3) Runtime degradation cascade
+
+```mermaid
+graph TD
+  L0[L0: Dual-LLM available] --> L0b[L0b: Single-LLM mode]
+  L0b --> L1[L1: Deterministic mode\nif Ollama unavailable]
+  L1 --> L2[L2: Climate fallback\nif ELM/PINN fails]
+  L2 --> L3[L3: Visualization fallback\n3D to 2D]
+  L3 --> L4[L4: Data fallback\nNASA/local cache only]
+```
 
 ## What it does
 
@@ -192,6 +294,8 @@ The agent autonomously fetches NASA data, computes indices, and optionally runs 
 
 Use the **Explanation depth** toggle (Scientist / Outreach) to control how technical the response is.
 
+![Agent AI tab](screenshots/ai_agent.png)
+
 ### Manual Mode
 
 Drag the sliders to set stellar and planetary parameters, then press **Run Simulation**. A pipeline progress bar shows each step (Validate, Compute, Simulate, Analyse). Enable **Live "What If" mode** to see the globe update in real time.
@@ -199,6 +303,8 @@ Drag the sliders to set stellar and planetary parameters, then press **Run Simul
 Available parameter sliders: stellar temperature, stellar radius, planet radius, mass, semi-major axis, eccentricity, Bond albedo, tidal locking, surface type (mixed rocky / ocean / desert / ice), atmosphere type (thin / temperate / thick), C/O ratio, surface pressure, and atmosphere regime (H₂-rich / O₂-rich / CH₄-CO₂).
 
 Select the **Climate model** to use: ELM Ensemble, PINNFormer 3-D, or Analytical fallback.
+
+![Manual Mode - top panel](screenshots/manual_mode_top_page.png)
 
 The panel shows:
 - ESI gauge (0-1 scale with colour zones)
@@ -210,9 +316,14 @@ The panel shows:
 - AI Interpretation expander (domain expert analysis, climate classification, physics review)
 - Raw data CSV export buttons for metrics and temperature maps
 
+![Manual Mode - 3D globe and AI interpretation](screenshots/manual_mode_3d_ai_interpretation.png)
+
 ### Catalog
 
 Browse the NASA Exoplanet Archive. Type a natural-language query (e.g. "rocky planets closer than 10 parsecs") and Qwen converts it to ADQL. Click famous-planet buttons for instant domain-expert summaries. **Fetch full catalog** runs anomaly detection and UMAP visualisation.
+
+![Catalog anomaly detection](screenshots/anomaly_detection.png)
+![Catalog real-vs-synthetic comparison](screenshots/CTGAN_stats.png)
 
 ### Science
 
@@ -227,6 +338,8 @@ Available after running a simulation:
 - **Compare with Earth** — domain-expert side-by-side analysis
 - **Planetary Soundscape** — sonification of the equatorial temperature profile
 
+![Science tab](screenshots/science.png)
+
 ### System
 
 - **LLM runtime mode selector** — switch between Dual-LLM, Single-LLM, and Deterministic modes
@@ -235,6 +348,8 @@ Available after running a simulation:
 - **Architecture diagram** — full data pipeline visualisation (Mermaid)
 - **Export** — download the 3-D globe as interactive HTML
 - **Docker** — deployment instructions
+
+![System tab](screenshots/system_tab.png)
 
 ### About us
 
@@ -383,7 +498,7 @@ The test suite (72 tests across 9 files) covers:
 | Climate surrogate | ELM (scikit-elm / NumPy) with conformal prediction |
 | Data augmentation | CTGAN |
 | Anomaly detection | Isolation Forest + UMAP |
-| RAG | ChromaDB + Sentence Transformers` |
+| RAG | ChromaDB + Sentence Transformers |
 | PINN | DeepXDE + custom PINNFormer (PyTorch) |
 | Validation | Pydantic |
 | Visualisation | Plotly |
