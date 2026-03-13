@@ -8,6 +8,9 @@ A real-time, browser-based climate-surrogate explorer for exoplanets, inspired b
   - [Table of Contents](#table-of-contents)
   - [System Architecture](#system-architecture)
   - [Data Flows](#data-flows)
+    - [1) User query to simulation output](#1-user-query-to-simulation-output)
+    - [2) Catalog ingestion and augmentation pipeline](#2-catalog-ingestion-and-augmentation-pipeline)
+    - [3) Runtime degradation cascade](#3-runtime-degradation-cascade)
   - [What it does](#what-it-does)
   - [Runtime Profiles](#runtime-profiles)
   - [Requirements](#requirements)
@@ -45,58 +48,55 @@ A real-time, browser-based climate-surrogate explorer for exoplanets, inspired b
 ## System Architecture
 
 ```mermaid
-graph TB
-  UI[Presentation Layer\nStreamlit app.py\nAgent AI, Manual, Catalog, Science, System, About]
+graph TD
+  subgraph Presentation ["Presentation Layer"]
+    UI["Streamlit app.py\n(Agent AI, Manual, Catalog, Science, System, About)"]
+  end
 
-  ORCH[Orchestration Layer\nLangChain AgentExecutor + tools\nDual-LLM / Single-LLM / Deterministic]
-  LLM1[Qwen 2.5-14B\nOrchestrator]
-  LLM2[AstroSage 8B\nDomain Expert]
+  subgraph Orchestration ["Orchestration Layer"]
+    ORCH["LangChain AgentExecutor + tools\n(Dual / Single / Deterministic)"]
+    LLM1["Qwen 2.5-14B\n(Orchestrator)"]
+    LLM2["AstroSage 8B\n(Domain Expert)"]
+    
+    %% Keep internal links strictly inside the subgraph
+    ORCH --> LLM1
+    ORCH --> LLM2
+  end
 
-  PHYS[Physics and ML Layer]
-  AP[astro_physics.py\nT_eq, ESI, SEPHI, HZ, ISA, biosignature risk]
-  ELM[elm_surrogate.py\nELM ensemble + conformal uncertainty]
-  PINN[pinnformer3d.py\nTransformer PINN surrogate]
-  CTGAN[data_augmentation.py\nCTGAN synthetic planets]
-  ANOM[anomaly_detection.py\nIsolation Forest + UMAP]
-  VIS[visualization.py\n3D globe + 2D heatmap fallback]
+  subgraph PhysicsML ["Physics and ML Layer"]
+    AP["astro_physics.py\n(T_eq, ESI, SEPHI, etc.)"]
+    ELM["elm_surrogate.py\n(ELM ensemble + uncertainty)"]
+    PINN["pinnformer3d.py\n(Transformer PINN)"]
+    CTGAN["data_augmentation.py\n(CTGAN synthetic planets)"]
+    ANOM["anomaly_detection.py\n(Isolation Forest + UMAP)"]
+    VIS["visualization.py\n(3D globe + 2D heatmap)"]
+  end
 
-  VAL[Validation and Degradation]
-  V1[validators.py\nPydantic guardrails]
-  V2[degradation.py\nL0 to L4 fallback manager]
+  subgraph Validation ["Validation & Degradation"]
+    V1["validators.py\n(Pydantic guardrails)"]
+    V2["degradation.py\n(L0 to L4 fallback manager)"]
+  end
 
-  DATA[Data Layer]
-  NASA[nasa_client.py\nNASA TAP/ADQL]
-  COMB[combined_catalog.py\nNASA + EU + DACE + Gaia merge]
-  RAG[rag_citations.py\nHybrid semantic + TF-IDF citations]
+  subgraph DataLayer ["Data Layer"]
+    NASA["nasa_client.py\n(NASA TAP/ADQL)"]
+    COMB["combined_catalog.py\n(NASA + EU + DACE + Gaia)"]
+    RAG["rag_citations.py\n(Hybrid semantic + TF-IDF)"]
+  end
 
-  UI --> ORCH
-  ORCH --> LLM1
-  ORCH --> LLM2
-  ORCH --> PHYS
-
-  PHYS --> AP
-  PHYS --> ELM
-  PHYS --> PINN
-  PHYS --> CTGAN
-  PHYS --> ANOM
-  PHYS --> VIS
-
-  PHYS --> VAL
-  VAL --> V1
-  VAL --> V2
-
-  PHYS --> DATA
-  DATA --> NASA
-  DATA --> COMB
-  DATA --> RAG
+  %% Subgraph-to-subgraph linking prevents internal node stretching
+  Presentation --> Orchestration
+  Orchestration --> PhysicsML
+  PhysicsML --> Validation
+  PhysicsML --> DataLayer
 ```
+
 
 ## Data Flows
 
 ### 1) User query to simulation output
 
 ```mermaid
-graph LR
+graph TD
   A[User input\nchat prompt or manual sliders] --> B[PlanetaryParameters validation]
   B --> C[Deterministic physics\nT_eq, flux, ESI, SEPHI, HZ, ISA, biosignature risk]
   C --> D[SimulationOutput validation]
