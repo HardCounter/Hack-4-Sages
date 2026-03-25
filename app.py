@@ -467,11 +467,10 @@ def _render_agent_dashboard(viz: dict):
 
 # ─── Cached loaders ──────────────────────────────────────────────────────────
 
-@st.cache_resource
-def _load_agent(mode: str = "dual_llm"):
+def _load_agent(mode: str = "dual_llm", host: str = None):
     from modules.agent_setup import AgentMode, build_agent
     agent_mode = AgentMode(mode)
-    return build_agent(agent_mode)
+    return build_agent(agent_mode, host=host)
 
 
 @st.cache_resource
@@ -559,11 +558,11 @@ tab_agent, tab_manual, tab_catalog, tab_science, tab_system, tab_about = st.tabs
 )
 
 # ═══════════════════════════════════════════════════════════════════════════════
-# TAB 1 — Agent AI with transparent reasoning
+# TAB 1 — Agent AI
 # ═══════════════════════════════════════════════════════════════════════════════
 
 with tab_agent:
-    col_chat, col_reasoning = st.columns([3, 1])
+    col_chat = st.container()
 
     with col_chat:
         st.subheader("Conversation with AstroAgent")
@@ -607,17 +606,23 @@ with tab_agent:
                             cls = HumanMessage if m["role"] == "user" else AIMessage
                             lc_history.append(cls(content=m["content"]))
 
-                        agent = _load_agent(st.session_state["llm_mode"])
-                        if agent is None:
-                            answer = ("Agent unavailable in Deterministic mode. "
-                                      "Switch to Single-LLM or Dual-LLM in the System tab.")
-                            steps = []
-                        else:
-                            response = agent.invoke(
-                                {"input": full_prompt, "chat_history": lc_history}
-                            )
-                            answer = response["output"]
-                            steps = response.get("intermediate_steps", [])
+                        from modules.ollama_balancer import get_balancer as _get_lb
+                        with _get_lb().session_scope() as _host:
+                            st.session_state["_ollama_host"] = _host
+                            try:
+                                agent = _load_agent(st.session_state["llm_mode"], host=_host)
+                                if agent is None:
+                                    answer = ("Agent unavailable in Deterministic mode. "
+                                              "Switch to Single-LLM or Dual-LLM in the System tab.")
+                                    steps = []
+                                else:
+                                    response = agent.invoke(
+                                        {"input": full_prompt, "chat_history": lc_history}
+                                    )
+                                    answer = response["output"]
+                                    steps = response.get("intermediate_steps", [])
+                            finally:
+                                st.session_state.pop("_ollama_host", None)
                     except Exception as exc:
                         answer = f"Agent unavailable: {exc}"
                         steps = []
@@ -656,30 +661,8 @@ with tab_agent:
                         st.session_state.chat_history.append({"role": "user", "content": s})
                         st.rerun()
 
-    # Transparent reasoning panel (enhancement B2)
-    with col_reasoning:
-        st.subheader("Reasoning Chain")
-        _steps = st.session_state.get("_last_agent_steps", [])
-        if _steps:
-            for i, (action, obs) in enumerate(_steps):
-                is_expert = action.tool == "consult_domain_expert"
-                if is_expert:
-                    st.markdown(
-                        '<div style="background:linear-gradient(135deg,#1a237e,#4a148c);'
-                        'padding:12px;border-radius:8px;border:1px solid #7c4dff;'
-                        'margin-bottom:8px">'
-                        '<strong style="color:#b388ff">'
-                        'Expert Opinion</strong></div>',
-                        unsafe_allow_html=True,
-                    )
-                    st.markdown(sanitize_latex(obs[:800]))
-                else:
-                    with st.expander(f"Step {i+1}: {action.tool}", expanded=(i == 0)):
-                        st.markdown(f"**Tool:** `{action.tool}`")
-                        st.markdown(f"**Input:** `{action.tool_input}`")
-                        st.markdown(f"**Output:** {sanitize_latex(obs[:500])}")
-        else:
-            st.info("Reasoning steps appear here after each agent response.")
+
+
 
     # ── Agent Visual Dashboard (full-width, below chat + reasoning) ──────
     _viz = st.session_state.get("_agent_viz", {})
@@ -2097,13 +2080,27 @@ with tab_system:
             except Exception as exc:
                 checks["PINNFormer 3-D"] = f"{_ICON_NO} {exc}"
 
-            # 6. Ollama
-            st.write("Checking Ollama...")
+            # 6. Ollama (multi-host load balancer)
+            st.write("Checking Ollama hosts...")
             try:
                 import ollama as _oll
-                tags = _oll.list()
-                names = [m.model for m in tags.models] if hasattr(tags, "models") else []
-                checks["Ollama"] = f"{_ICON_YES} {len(names)} models: {', '.join(names[:5])}"
+                from modules.ollama_balancer import get_balancer
+                balancer = get_balancer()
+                host_results = balancer.check_all()
+                stats = balancer.get_stats()
+                for host, alive in host_results.items():
+                    s = stats[host]
+                    tag = f"reqs: {s['total_requests']}, in-flight: {s['in_flight']}"
+                    if alive:
+                        client = _oll.Client(host=host)
+                        tags = client.list()
+                        names = [m.model for m in tags.models] if hasattr(tags, "models") else []
+                        checks[f"Ollama ({host})"] = (
+                            f"{_ICON_YES} {len(names)} models: "
+                            f"{', '.join(names[:5])} | {tag}"
+                        )
+                    else:
+                        checks[f"Ollama ({host})"] = f"{_ICON_NO} unreachable | {tag}"
             except Exception as exc:
                 checks["Ollama"] = f"{_ICON_NO} {exc}"
 

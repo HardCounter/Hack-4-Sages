@@ -28,6 +28,8 @@ except ImportError:
     _HAS_OLLAMA = False
     logger.warning("ollama package not installed — LLM helpers will return fallbacks.")
 
+from modules.ollama_balancer import get_balancer as _get_balancer
+
 # ─── Model resolution ─────────────────────────────────────────────────────────
 
 _DOMAIN_MODEL = "astro-agent"
@@ -91,6 +93,32 @@ def _extract_content(resp) -> str:
 _DEFAULT_OPTS = {"num_predict": 2048, "temperature": 0.4}
 
 
+def _chat_with_failover(model: str, prompt: str, opts: dict) -> str:
+    """Send a chat request to the least-loaded host, retrying on failure."""
+    balancer = _get_balancer()
+    last_exc = None
+    for attempt in range(len(balancer.hosts)):
+        host = balancer.next_host()
+        print(f"[HELPER LLM] _chat_with_failover({model}) attempt={attempt+1} → {host}")
+        try:
+            client = _oll.Client(host=host)
+            resp = client.chat(
+                model=model,
+                messages=[{"role": "user", "content": prompt}],
+                options=opts,
+            )
+            balancer.release(host)
+            print(f"[HELPER LLM] _chat_with_failover({model}) ✅ success on {host}")
+            return _extract_content(resp)
+        except Exception as exc:
+            print(f"[HELPER LLM] _chat_with_failover({model}) ❌ FAILED on {host}: {exc}")
+            logger.warning("Ollama call to %s failed: %s", host, exc)
+            balancer.release(host)
+            balancer.mark_unhealthy(host)
+            last_exc = exc
+    raise last_exc  # type: ignore[misc]
+
+
 def _ask_domain(prompt: str, **extra_opts) -> str:
     """Send a single prompt to the AstroSage domain expert."""
     if _ACTIVE_MODE == "deterministic":
@@ -98,12 +126,7 @@ def _ask_domain(prompt: str, **extra_opts) -> str:
     if not _HAS_OLLAMA:
         raise ImportError("ollama package not installed")
     opts = {**_DEFAULT_OPTS, **extra_opts}
-    resp = _oll.chat(
-        model=_DOMAIN_MODEL,
-        messages=[{"role": "user", "content": prompt}],
-        options=opts,
-    )
-    return _extract_content(resp)
+    return _chat_with_failover(_DOMAIN_MODEL, prompt, opts)
 
 
 def _ask_orchestrator(prompt: str, **extra_opts) -> str:
@@ -114,12 +137,7 @@ def _ask_orchestrator(prompt: str, **extra_opts) -> str:
         raise ImportError("ollama package not installed")
     model = _resolve_orchestrator_model()
     opts = {**_DEFAULT_OPTS, **extra_opts}
-    resp = _oll.chat(
-        model=model,
-        messages=[{"role": "user", "content": prompt}],
-        options=opts,
-    )
-    return _extract_content(resp)
+    return _chat_with_failover(model, prompt, opts)
 
 
 def _safe(fn, *args, fallback: str = "") -> str:

@@ -52,48 +52,75 @@ class AgentMode(str, Enum):
 
 # ─── LLM factory ──────────────────────────────────────────────────────────────
 
-_BASE_URL = "http://localhost:11434"
+from modules.ollama_balancer import (
+    get_balancer as _get_balancer,
+    get_reserved_host as _get_reserved_host,
+)
+
+# Pre-created ChatOllama instances keyed by (model, host).
+_llm_pool: dict[tuple[str, str], ChatOllama] = {}
 
 
-def _make_llm(model: str) -> ChatOllama:
-    return ChatOllama(
-        model=model,
-        temperature=0.3,
-        num_ctx=8192,
-        base_url=_BASE_URL,
-    )
+def _get_peer(model: str, host: str) -> ChatOllama:
+    """Return a cached ChatOllama instance for a specific (model, host) pair."""
+    key = (model, host)
+    if key not in _llm_pool:
+        logger.info("Creating ChatOllama(%s) → %s", model, host)
+        _llm_pool[key] = ChatOllama(
+            model=model,
+            temperature=0.3,
+            num_ctx=8192,
+            base_url=host,
+        )
+    return _llm_pool[key]
 
 
-_primary_llm: Optional[ChatOllama] = None
-_domain_llm: Optional[ChatOllama] = None
+def _resolve_host() -> str:
+    """Return the session-scoped host, or the first available host as fallback.
+
+    Checks Streamlit session state first (set by app.py when entering
+    session_scope), then thread-local reserved host, then balancer.
+    Session state ensures tools get the correct host even when LangChain
+    runs them in a different thread than the one that entered session_scope.
+    """
+    try:
+        import streamlit as _st
+        host = _st.session_state.get("_ollama_host")
+        if host:
+            return host
+    except Exception:
+        pass
+    reserved = _get_reserved_host()
+    if reserved:
+        return reserved
+    balancer = _get_balancer()
+    healthy = balancer.get_healthy_hosts()
+    return healthy[0] if healthy else balancer.hosts[0]
+
+
+def _warm_peer_pool() -> None:
+    """Pre-create ChatOllama instances for all hosts so first calls are fast."""
+    for host in _get_balancer().hosts:
+        _get_peer("qwen2.5:14b", host)
+        _get_peer("astro-agent", host)
+
+
+_warm_peer_pool()
 
 
 def _get_primary_llm() -> ChatOllama:
-    global _primary_llm
-    if _primary_llm is None:
-        _primary_llm = _make_llm("qwen2.5:14b")
-    return _primary_llm
+    return _get_peer("qwen2.5:14b", _resolve_host())
 
 
 def _get_domain_llm() -> ChatOllama:
-    global _domain_llm
-    if _domain_llm is None:
-        _domain_llm = _make_llm("astro-agent")
-    return _domain_llm
+    return _get_peer("astro-agent", _resolve_host())
 
 
 def get_domain_llm_for_mode(mode: AgentMode) -> Optional[ChatOllama]:
     """Return the domain-expert LLM for the given mode, or None."""
     if mode == AgentMode.DETERMINISTIC:
         return None
-    if mode == AgentMode.SINGLE_LLM:
-        return _get_domain_llm()
     return _get_domain_llm()
-
-
-# Legacy module-level aliases (kept for backward compat with llm_helpers.py)
-primary_llm = property(lambda self: _get_primary_llm())
-domain_llm = property(lambda self: _get_domain_llm())
 
 
 # ─── Tool definitions ─────────────────────────────────────────────────────────
@@ -217,8 +244,8 @@ def search_planet_catalog(
 def compute_habitability(
     stellar_temp: float,
     stellar_radius: float,
-    planet_radius_jup: float,
-    planet_mass_jup: float,
+    radius_earth: float,
+    mass_earth: float,
     semi_major_axis: float,
     albedo: float = 0.3,
     tidally_locked: bool = True,
@@ -229,11 +256,14 @@ def compute_habitability(
     Call this after retrieving NASA data.  Results are automatically
     visualised in the dashboard (ESI gauge, SEPHI badges, HZ diagram, etc.).
 
+    If the NASA archive provides Jupiter-unit values (pl_radj, pl_bmassj),
+    convert first: radius_earth = pl_radj * 11.209, mass_earth = pl_bmassj * 317.83.
+
     Args:
         stellar_temp: Host star effective temperature [K].
         stellar_radius: Host star radius [R_sun].
-        planet_radius_jup: Planet radius [R_Jupiter].
-        planet_mass_jup: Planet mass [M_Jupiter].
+        radius_earth: Planet radius [R_Earth].
+        mass_earth: Planet mass [M_Earth].
         semi_major_axis: Orbital semi-major axis [AU].
         albedo: Bond albedo (default 0.3).
         tidally_locked: Whether the planet is tidally locked.
@@ -246,6 +276,9 @@ def compute_habitability(
         compute_full_analysis,
         hz_boundaries,
     )
+
+    planet_radius_jup = radius_earth / 11.209
+    planet_mass_jup = mass_earth / 317.83
 
     result = compute_full_analysis(
         stellar_temp,
@@ -351,9 +384,9 @@ def assess_carbon_oxygen_ratio(co_ratio: float) -> str:
 def run_climate_simulation(
     radius_earth: float,
     mass_earth: float,
-    semi_major_axis_au: float,
-    star_teff_K: float,
-    star_radius_solar: float,
+    semi_major_axis: float,
+    stellar_temp: float,
+    stellar_radius: float,
     insol_earth: float,
     albedo: float = 0.3,
     tidally_locked: int = 1,
@@ -367,9 +400,9 @@ def run_climate_simulation(
     Args:
         radius_earth: Planet radius [R⊕].
         mass_earth: Planet mass [M⊕].
-        semi_major_axis_au: Semi-major axis [AU].
-        star_teff_K: Star effective temperature [K].
-        star_radius_solar: Star radius [R_sun].
+        semi_major_axis: Orbital semi-major axis [AU].
+        stellar_temp: Host star effective temperature [K].
+        stellar_radius: Host star radius [R_sun].
         insol_earth: Instellation [S_Earth].
         albedo: Bond albedo (default 0.3).
         tidally_locked: 1 if tidally locked, 0 otherwise.
@@ -380,15 +413,15 @@ def run_climate_simulation(
 
     locked = bool(tidally_locked)
     T_eq = equilibrium_temperature(
-        star_teff_K, star_radius_solar, semi_major_axis_au, albedo, locked,
+        stellar_temp, stellar_radius, semi_major_axis, albedo, locked,
     )
 
     params = {
         "radius_earth": radius_earth,
         "mass_earth": mass_earth,
-        "semi_major_axis_au": semi_major_axis_au,
-        "star_teff_K": star_teff_K,
-        "star_radius_solar": star_radius_solar,
+        "semi_major_axis_au": semi_major_axis,
+        "star_teff_K": stellar_temp,
+        "star_radius_solar": stellar_radius,
         "insol_earth": insol_earth,
         "albedo": albedo,
         "tidally_locked": tidally_locked,
@@ -428,9 +461,9 @@ def run_climate_simulation(
         T_max=float(temp_map.max()),
         T_mean=float(temp_map.mean()),
         hsf=hsf,
-        star_teff=star_teff_K,
-        star_radius=star_radius_solar,
-        semi_major=semi_major_axis_au,
+        star_teff=stellar_temp,
+        star_radius=stellar_radius,
+        semi_major=semi_major_axis,
         planet_radius=radius_earth,
         planet_mass=mass_earth,
         albedo=albedo,
@@ -683,6 +716,9 @@ tools = [
     cite_scientific_literature,
 ]
 
+for _t in tools:
+    _t.handle_tool_error = True
+
 # ─── Agent prompt ─────────────────────────────────────────────────────────────
 
 SYSTEM_PROMPT = """\
@@ -770,8 +806,15 @@ _PROMPT_TEMPLATE = ChatPromptTemplate.from_messages(
 
 # ─── Agent builder ────────────────────────────────────────────────────────────
 
-def build_agent(mode: AgentMode = AgentMode.DUAL_LLM) -> Optional[AgentExecutor]:
+def build_agent(
+    mode: AgentMode = AgentMode.DUAL_LLM,
+    host: Optional[str] = None,
+) -> Optional[AgentExecutor]:
     """Construct an AgentExecutor for the requested runtime mode.
+
+    *host* pins the orchestrator LLM to a specific Ollama instance.
+    Pass the host from ``session_scope()`` so that concurrent requests
+    from different users land on different GPUs.
 
     Returns ``None`` when mode is DETERMINISTIC (no LLM needed).
     """
@@ -779,14 +822,16 @@ def build_agent(mode: AgentMode = AgentMode.DUAL_LLM) -> Optional[AgentExecutor]
         logger.info("AgentMode.DETERMINISTIC — no LLM agent created.")
         return None
 
+    target = host or _resolve_host()
+
     if mode == AgentMode.SINGLE_LLM:
-        llm = _get_domain_llm()
+        llm = _get_peer("astro-agent", target)
         max_iter = 5
-        logger.info("AgentMode.SINGLE_LLM — astro-agent as sole LLM.")
+        logger.info("AgentMode.SINGLE_LLM — astro-agent on %s.", target)
     else:
-        llm = _get_primary_llm()
+        llm = _get_peer("qwen2.5:14b", target)
         max_iter = 7
-        logger.info("AgentMode.DUAL_LLM — Qwen orchestrator + astro-agent expert.")
+        logger.info("AgentMode.DUAL_LLM — Qwen on %s + astro-agent expert.", target)
 
     agent = create_tool_calling_agent(llm, tools, _PROMPT_TEMPLATE)
     return AgentExecutor(
@@ -796,7 +841,3 @@ def build_agent(mode: AgentMode = AgentMode.DUAL_LLM) -> Optional[AgentExecutor]
         max_iterations=max_iter,
         handle_parsing_errors=True,
     )
-
-
-# Legacy default executor (backward compat with app.py before mode migration)
-agent_executor = build_agent(AgentMode.DUAL_LLM)
