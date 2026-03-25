@@ -1,0 +1,68 @@
+\documentclass[12pt,a4paper]{article}
+
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage[english]{babel}
+\usepackage{graphicx}
+\usepackage{geometry}
+\geometry{a4paper, margin=2.5cm}
+\usepackage{hyperref}
+\usepackage{amsmath}
+\usepackage{booktabs}
+\usepackage{float}
+
+\begin{document}
+
+\begin{titlepage}
+    \centering
+    % Ensure header.png is placed in the diploma-report folder
+    \includegraphics[width=0.6\textwidth]{header.png}\par\vspace{1cm}
+    
+    {\scshape\Large Faculty of Mathematics and Information Science \par}
+    \vspace{1.5cm}
+    
+    {\huge\bfseries Autonomous Exoplanetary Digital Twin\par}
+    \vspace{0.5cm}
+    {\Large Engineering Degree Project Report\par}
+    
+    \vspace{2cm}
+    
+    {\Large\itshape Authors:\par}
+    {\Large Piotr Czechowski \par}
+    {\Large Aleksander Jeżowski \par}
+    
+    \vfill
+    
+    {\large \today\par}
+\end{titlepage}
+
+\section{Introduction}
+The "Autonomous Exoplanetary Digital Twin" is a real-time, browser-based climate surrogate explorer designed for exoplanetary research. The project provides an interactive environment to explore, simulate, and analyze planetary climates and astrophysical parameters. Built with scalability and graceful degradation in mind, it combines determinism from validated astrophysical equations with the flexibility of modern Machine Learning and AI models.
+
+\section{Application Design}
+The user interface is powered by Streamlit, offering six main tabs (Agent AI, Manual Mode, Catalog, Science, System, About Us). The architecture follows a strict "Graceful Degradation" module with five levels (L0 to L4) to ensure the system remains functional even if specific external or heavy ML systems fail:
+\begin{itemize}
+    \item \textbf{L0 (Optimal):} Dual-LLM system active.
+    \item \textbf{L1--L3 (Degraded):} Fallbacks to simpler deterministic tools or 2D heatmap renderings if complex 3D models or language models become unavailable or computationally expensive.
+    \item \textbf{L4 (Minimal):} Relies completely on basic NASA exoplanet archive queries.
+\end{itemize}
+
+\section{Machine Learning and AI Modules}
+The project heavily leverages modern Machine Learning and Artificial Intelligence technologies for system orchestration, fast physics-consistent simulation, and data augmentation.
+
+\subsection{Dual-LLM Orchestration}
+The system utilizes a dual-Agent architecture built with LangChain. A primary reasoning model (Qwen 2.5-14B) acts as the orchestrator, while a specialized domain expert model (AstroSage-8B) provides deep astrophysics context. This multi-agent setup invokes 11 deterministic tool integrations, ensuring that complex calculations form the basis of the LLM responses rather than relying on "hallucinated" data.
+
+\subsection{ELM Ensemble Climate Surrogate}
+An Extreme Learning Machine (ELM) ensemble acts as the primary fast-surrogate model for climate approximations. It features conformal prediction to provide rigorous uncertainty bounds. The module includes a safe fallback mechanism to a pure-NumPy Moore-Penrose pseudoinverse implementation, ensuring uninterrupted service in minimal environments.
+
+\subsection{PINNFormer 3D Climate Model}
+For high-fidelity 3D atmospheric modeling, the system incorporates a Physics-Informed Neural Network (PINN) based on the Transformer architecture (PINNFormer). Implemented in PyTorch, this model predicts atmospheric dynamics while respecting underlying physical laws, outputting complex temperature maps rendered dynamically onto interactive Plotly 3D globes.
+
+\subsection{CTGAN Data Augmentation \& Anomaly Detection}
+To handle sparse datasets and simulate theoretical exoplanet candidates, the project employs CTGAN (Conditional Tabular GAN) to generate synthetic, physically-validated data. Alongside this generative approach, Isolation Forests and UMAP are utilized for robust anomaly detection within planetary catalogs.
+
+\section{Conclusion}
+This engineering project successfully integrates robust software engineering principles with advanced AI models. By bridging complex predictive surrogates (ELMs, PINNs) with LLM-based intelligent routing, it provides a highly comprehensive and reliable digital twin for exoplanetary exploration.
+
+\end{document}
