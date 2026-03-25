@@ -712,7 +712,7 @@ tools = [
     consult_domain_expert,
     discover_most_habitable,
     compare_two_planets,
-    detect_anomalous_planets,
+    # detect_anomalous_planets,  # Disabled: removes 5th core agent
     cite_scientific_literature,
 ]
 
