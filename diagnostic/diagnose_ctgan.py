@@ -198,7 +198,7 @@ _TALKING_POINTS_HTML = """
 <div style="background:#1a1a2e;padding:16px;border-radius:8px;margin:12px 0">
 
 <h3>1. Why class imbalance is a core problem</h3>
-<p>Out of ~5 700 confirmed exoplanets, only ~60 fall into the
+<p>Out of ~6 100 confirmed exoplanets, only ~60 fall into the
 habitable zone by standard criteria (radius 0.5–2.5 R⊕, stellar
 flux 0.2–2.0 S⊕, T_eff 2500–7000 K). That is roughly a <b>1:95
 imbalance ratio</b>. Any supervised model trained on raw counts
@@ -498,7 +498,7 @@ def main() -> None:
     print("TALKING POINTS — Class Imbalance & Augmentation")
     print("=" * 80)
     print(
-        "\n1. CLASS IMBALANCE: ~60 habitable planets out of ~5 700 confirmed "
+        "\n1. CLASS IMBALANCE: ~60 habitable planets out of ~6 100 confirmed "
         "(1:95 ratio).\n"
         "   Any classifier trained on raw counts predicts 'not habitable'\n"
         "   almost always and still hits >98% accuracy (accuracy paradox).\n"
