@@ -134,6 +134,31 @@ We incorporated a simplified heuristic model based on Kite et al. (2009) to esti
 \section{Limitations and Future Work}
 While the ELM and PINN models generate statistically valid distributions and visually plausible maps, these approximations should be explicitly benchmarked and fine-tuned against a larger corpus of exact ROCKE-3D outputs. Currently, the atmospheric layers remain static across the time domain, and eccentricity is presumed zero. Addressing time-dependent variations and eccentric orbits will be priority goals for subsequent scaling of the digital twin. 
 
+
+\section{Proposed Thesis Objectives (Future Development)}
+Given the expansive nature of the Autonomous Exoplanetary Digital Twin, narrowing down the scope to specific, highly novel features is essential for an engineering diploma thesis. We propose the following distinct tracks for future development, from which the final thesis topic can be localized.
+
+\subsection{Track 1: Advanced Deep Learning \& Spatiotemporal Climate Modeling}
+\begin{itemize}
+    \item \textbf{Spatiotemporal Vision Transformers (ST-ViT) \& Neural ODEs:} Real climates involve chaotic fluid dynamics and cloud formations over time. By training an ST-ViT or Neural ODE directly on 4D NetCDF files from ROCKE-3D GCM, the system could simulate ''time-stepping'', capturing global teleconnections (e.g., how an equatorial storm affects polar ice formation).
+    \item \textbf{Physics-Informed GANs (PI-GAN) for Stochastic Weather:} Unlike standard PINNs that regress to a smooth average solution, replacing or augmenting the PINN with a Wasserstein GAN with Gradient Penalty would allow synthetic generation of high-resolution, stochastical weather maps ensuring compliance with continuous Navier-Stokes equations via discriminator penalties.
+    \item \textbf{Fourier Neural Operators (FNO) or Kolmogorov-Arnold Networks (KAN):} Developing next-generation, resolution-invariant PDE operators using FNOs or KANs as replacements for the current MLP-based or Transformer-based PINN parameterizations.
+\end{itemize}
+
+\subsection{Track 2: Astrobiology, Spectroscopy \& Stellar Interactions}
+\begin{itemize}
+    \item \textbf{Transition to Atmospheric Retrieval (Spectroscopy):} Transitioning from predicting surface temperatures to predicting transmission spectra. By integrating the NASA Planetary Spectrum Generator (PSG) API and implementing a ''Spectrum Transformer'' (SpT) or Bayesian Neural Network, the digital twin could ingest a light curve and predict the atmospheric mole fractions of $\text{H}_2\text{O}$, $\text{CH}_4$, and $\text{O}_3$.
+    \item \textbf{Red Dwarf Flare Survival Simulator:} Using libraries like \textit{lightkurve} and \textit{AltaiPony} to pull raw TESS time-series data, the model can calculate Flare Frequency Distributions (FFD) of host stars. This would drive a hydrodynamic escape module simulating atmospheric mass loss over millions of years due to XUV flares.
+    \item \textbf{Deep Prebiotic Chemistry (Origin of Life Simulator):} Moving beyond basic habitability (liquid water) to prebiotic probability. Implementing a specialized LLM agent connected to a chemical reaction network database (e.g., ChemCrow, ChemOrigins) to solve Poisson kinetic matrices, predicting the probability of RNA-like polymer stabilization in simulated hydrothermal vents.
+\end{itemize}
+
+\subsection{Track 3: Uncertainty Quantification \& Representation Learning}
+\begin{itemize}
+    \item \textbf{Gaussian Process Regression (GPR):} Implementing GPR to complement the ELM ensemble. GPR natively provides both prediction values and standard deviation (confidence intervals) for every pixel in a climate temperature map without relying strictly on ensemble variations, guiding active learning by identifying unconstrained regions in parameter space.
+    \item \textbf{Variational Autoencoders (VAE) for Planetary Latent Space:} Building a neural encoder-decoder framework to cleanly map highly dimensional planetary data into a continuous 3D latent space. This would allow topological traversal and interpolation between known planets (e.g., synthesizing conditions halfway between TRAPPIST-1e and Proxima Centauri b).
+    \item \textbf{UMAP \& HDBSCAN for Exoplanet Taxonomy (Clustering):} Integrating Uniform Manifold Approximation (UMAP) and Hierarchical Density-Based Spatial Clustering (HDBSCAN) to autonomously discover non-linear taxonomic classifications of exoplanets from multidimensional catalog features. Unlike manual habitability thresholding, this unsupervised approach dynamically identifies new physical families of exoplanets and flags deep-space anomalies.
+\end{itemize}
+
 \section{Conclusion}
 The ``Autonomous Exoplanetary Digital Twin'' represents a cohesive integration of advanced software engineering patterns, physics engines, and state-of-the-art Artificial Intelligence. By architecting a Dual-LLM framework operating on top of custom ELMs, PyTorch PDE solvers, and tabular GANs, the system achieves near-instantaneous surrogate climate models and intelligent analysis. It proves the feasibility of bringing supercomputer-grade hypotheses down to interactive web-scale applications to accelerate the field of exoplanetary characterization.
 
