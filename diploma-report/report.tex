@@ -41,11 +41,15 @@
 \end{titlepage}
 
 \begin{abstract}
-The ``Autonomous Exoplanetary Digital Twin'' is a real-time, browser-based climate surrogate explorer designed to bridge the gap between computationally expensive General Circulation Models (GCMs) and fast, interactive hypothesis generation. By integrating deterministically grounded astrophysical equations with modern Machine Learning (ML) techniques—including an Extreme Learning Machine (ELM) surrogate, a Transformer-based Physics-Informed Neural Network (PINNFormer), and a Dual-LLM LangChain orchestration—the user explores exoplanetary climates in seconds rather than weeks. This report outlines the system's architecture, application design, the scientific methodology underpinning the physics engine, and provides a deep dive into the artificial intelligence modules developed for this engineering project.
+The \textit{Autonomous Exoplanetary Digital Twin} is a real-time, browser-based climate surrogate explorer designed to bridge the gap between computationally expensive General Circulation Models (GCMs) and fast, interactive hypothesis generation.
+By integrating deterministically grounded astrophysical equations with modern Machine Learning (ML) techniques-including an Extreme Learning Machine (ELM) surrogate, a Transformer-based Physics-Informed Neural Network (PINNFormer), and a Dual-LLM LangChain orchestration-the user explores exoplanetary climates in seconds rather than weeks. This report outlines the system's architecture, application design, the scientific methodology underpinning the physics engine, and provides a deep dive into the artificial intelligence modules developed for this engineering project.
 \end{abstract}
 
 \tableofcontents
 \newpage
+
+
+
 
 \section{Introduction}
 Modern exoplanetary science relies heavily on 3D General Circulation Models (GCMs), such as ROCKE-3D and ExoCAM, to simulate the climates of newly discovered planets. However, these models require days or weeks of supercomputer time per simulation, rendering rapid parameter-space exploration unfeasible. The Autonomous Exoplanetary Digital Twin solves this problem by using fast ML surrogates inspired by GCM literature, producing approximate climate maps in a matter of seconds.
@@ -85,6 +89,9 @@ The application frontend is built using Streamlit, comprising over 1,600 lines o
     \item \textbf{Science \& System:} Dashboards outlining hardware resource usage, model diagnostics, RAG paper citations, and configuration options to switch between Dual-LLM, Single-LLM, and Deterministic modes.
 \end{enumerate}
 
+
+
+\newpage
 \section{Machine Learning and Artificial Intelligence Modules}
 Our system heavily integrates modern ML architectures to handle natural language understanding, complex PDE solving, and dataset augmentation. 
 
@@ -106,7 +113,7 @@ where $H$ is the hidden layer output matrix, $T$ is the target matrix, and $\lam
 For a more detailed, phenomenological approximation of 3D atmospheric dynamics without raw GCM compute, we designed a Physics-Informed Neural Network based on the Transformer architecture (PINNFormer). Implemented in PyTorch, the network optimizes an objective function that mathematically penalizes deviations from underlying simplified Navier-Stokes and thermodynamical PDEs. This allows the model to map dynamic interactions between temperature, primitive ocean heat transport, and cloud-fraction feedback.
 
 \subsection{CTGAN Generative Data Augmentation}
-Exoplanetary datasets exhibit extreme class imbalance—out of roughly 6,100 confirmed planets, fewer than 60 are considered potentially habitable. To train robust ML models, we employed a Conditional Tabular Generative Adversarial Network (CTGAN). The CTGAN learns the multi-dimensional distribution of the combined catalog and generates synthetic yet physically valid candidate planets. This oversampling strategy significantly improved the density of the training space for the ELM and anomaly detection modules.
+Exoplanetary datasets exhibit extreme class imbalance-out of roughly 6,100 confirmed planets, fewer than 60 are considered potentially habitable. To train robust ML models, we employed a Conditional Tabular Generative Adversarial Network (CTGAN). The CTGAN learns the multi-dimensional distribution of the combined catalog and generates synthetic yet physically valid candidate planets. This oversampling strategy significantly improved the density of the training space for the ELM and anomaly detection modules.
 
 \subsection{Anomaly Detection}
 We implemented an Isolation Forest algorithm paired with Uniform Manifold Approximation and Projection (UMAP) dimensionality reduction. Using inputs such as instellation, equilibrium temperature, and density, the Isolation Forest isolates statistical anomalies. These anomalies often correspond to exciting potentially habitable candidates or errant data points requiring manual review.
@@ -131,12 +138,22 @@ Using weighted variables for planetary radius, density, escape velocity, and sur
 \subsection{Interior-Surface-Atmosphere (ISA) Interaction}
 We incorporated a simplified heuristic model based on Kite et al. (2009) to estimate tectonic and outgassing probabilities, which strongly influence secondary atmospheric retention and false-positive biosignatures associated with abiotic oxygen accumulations. 
 
+
+
+
 \section{Limitations and Future Work}
-While the ELM and PINN models generate statistically valid distributions and visually plausible maps, these approximations should be explicitly benchmarked and fine-tuned against a larger corpus of exact ROCKE-3D outputs. Currently, the atmospheric layers remain static across the time domain, and eccentricity is presumed zero. Addressing time-dependent variations and eccentric orbits will be priority goals for subsequent scaling of the digital twin. 
+While the ELM and PINN models generate statistically valid distributions and visually plausible maps,
+these approximations should be explicitly benchmarked and fine-tuned against a larger corpus of exact ROCKE-3D outputs.
+Currently, the atmospheric layers remain static across the time domain, and eccentricity is presumed zero.
+Addressing time-dependent variations and eccentric orbits will be priority goals for subsequent scaling of the digital twin. 
 
 
 \section{Proposed Thesis Objectives (Future Development)}
-Given the expansive nature of the Autonomous Exoplanetary Digital Twin, narrowing down the scope to specific, highly novel features is essential for an engineering diploma thesis. We propose the following distinct tracks for future development, from which the final thesis topic can be localized.
+Given the expansive nature of the \textit{Autonomous Exoplanetary Digital Twin},
+narrowing down the scope to specific features is essential for an engineering diploma thesis.
+We propose the following distinct tracks for future development, from which the final thesis topic can be chosen.
+
+
 
 \subsection{Track 1: Advanced Deep Learning \& Spatiotemporal Climate Modeling}
 \begin{itemize}
@@ -160,6 +177,6 @@ Given the expansive nature of the Autonomous Exoplanetary Digital Twin, narrowin
 \end{itemize}
 
 \section{Conclusion}
-The ``Autonomous Exoplanetary Digital Twin'' represents a cohesive integration of advanced software engineering patterns, physics engines, and state-of-the-art Artificial Intelligence. By architecting a Dual-LLM framework operating on top of custom ELMs, PyTorch PDE solvers, and tabular GANs, the system achieves near-instantaneous surrogate climate models and intelligent analysis. It proves the feasibility of bringing supercomputer-grade hypotheses down to interactive web-scale applications to accelerate the field of exoplanetary characterization.
+The \textit{Autonomous Exoplanetary Digital Twin} represents a cohesive integration of advanced software engineering patterns, physics engines, and state-of-the-art Artificial Intelligence. By architecting a Dual-LLM framework operating on top of custom ELMs, PyTorch PDE solvers, and tabular GANs, the system achieves near-instantaneous surrogate climate models and intelligent analysis. It proves the feasibility of bringing supercomputer-grade hypotheses down to interactive web-scale applications to accelerate the field of exoplanetary characterization.
 
 \end{document}
