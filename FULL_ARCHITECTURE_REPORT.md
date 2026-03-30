@@ -57,7 +57,7 @@ The **Autonomous Exoplanetary Digital Twin** is a full-stack scientific applicat
 2. **Computes physics-based habitability indices** — equilibrium temperature, Earth Similarity Index (ESI), SEPHI score, habitable zone boundaries, atmospheric escape timescales, interior-surface-atmosphere (ISA) coupling, and biosignature false-positive risk.
 3. **Generates climate surface-temperature maps** via a cascade of three models (ELM ensemble → PINNFormer 3-D → analytical fallback), each with increasing simplicity and availability guarantees.
 4. **Renders interactive 3-D globes** of the predicted surface temperature with optional cloud-fraction overlays, host-star markers, and rotation animation.
-5. **Augments sparse habitable-planet data** using a CTGAN trained on ~5,700 confirmed planets to address extreme class imbalance (~60 real habitable candidates).
+5. **Augments sparse habitable-planet data** using a CTGAN trained on ~6,100 confirmed planets to address extreme class imbalance (~60 real habitable candidates).
 6. **Detects anomalous planets** in the catalog via Isolation Forest + UMAP embeddings.
 7. **Grounds all scientific claims** in a RAG system indexing 40 peer-reviewed papers with hybrid semantic + TF-IDF search.
 8. **Provides autonomous AI agent interaction** via a LangChain agent backed by two LLMs: Qwen 2.5-14B (orchestrator) and AstroSage-Llama-3.1-8B (domain expert).
@@ -538,7 +538,7 @@ $$\kappa T'' + S_{abs}(x) - \sigma T^4 = 0, \quad x \in [0, \pi]$$
 ### 3.8 `modules/data_augmentation.py` — CTGAN Synthetic Data
 
 **Lines:** ~250  
-**Role:** Address extreme class imbalance in NASA catalog (~60 habitable vs ~5,700 total).
+**Role:** Address extreme class imbalance in NASA catalog (~60 habitable vs ~6,100 total).
 
 #### `ExoplanetDataAugmenter` Class
 
@@ -633,7 +633,7 @@ Each paper contains: id, title, authors, year, journal, abstract, topics (list o
 - **`query_nasa_archive(adql_query)`:** HTTP GET to `https://exoplanetarchive.ipac.caltech.edu/TAP/sync`, returns CSV → DataFrame.
 - **`get_planet_data(planet_name)`:** Fetches full parameter set for a single planet from `pscomppars`.
 - **`get_habitable_candidates()`:** Parameterised query for Earth-sized (R 0.5–2.5 R_J), HZ-insolation (0.2–2.0 S⊕), solar-like host (2500–7000 K).
-- **`get_all_confirmed_planets()`:** Full catalog (~5,700 rows) for CTGAN training.
+- **`get_all_confirmed_planets()`:** Full catalog (~6,100 rows) for CTGAN training.
 - **Unit converters:** `jupiter_to_earth_radius/mass`, `log_solar_lum_to_watts`, `solar_to_meters_radius`, `au_to_meters`.
 
 ---
@@ -869,7 +869,7 @@ Outputs: `data/gaia_raw.csv`, `data/exoplanet_eu_raw.csv`, `data/dace_raw.csv`.
 | **Class balancing** | Noise-augmented upsampling of habitable class pre-training |
 | **Conditional sampling** | `condition_column="habitable", condition_value=1` |
 | **Post-hoc filter** | Hard physics bounds + 1st–99th percentile clipping |
-| **Training data** | Combined catalog (NASA + EU + DACE), ~5,700 planets |
+| **Training data** | Combined catalog (NASA + EU + DACE), ~6,100 planets |
 | **Default epochs** | 600 |
 
 ### 4.5 Isolation Forest

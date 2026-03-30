@@ -1,0 +1,27 @@
+
+before each figure write figure x shows: ""
+citations needed reffering to literature where it is used in the text [1] near the akapit where it was used
+
+each chapter is 1 page and each chapter starts from a new page
+
+each chapter has to have a figure
+
+reduce description to max 2 pages
+
+the report should focus more on the ai part not the whole app
+
+what elm we used and how we used it
+
+
+
+Report only about ai we used, we need to show the results, of our ai
+
+dont use subsections, keep to just 1 page!!!
+
+scheme of elm, explain what is elm? 
+
+describe the datasets from nasa and europe
+
+
+
+present the dataset explanation then ai explanation
