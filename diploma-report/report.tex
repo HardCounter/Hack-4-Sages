@@ -1,0 +1,182 @@
+\documentclass[12pt,a4paper]{article}
+
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage[english]{babel}
+\usepackage{graphicx}
+\usepackage{geometry}
+\geometry{a4paper, margin=2.5cm}
+\usepackage{hyperref}
+\usepackage{amsmath}
+\usepackage{amssymb}
+\usepackage{booktabs}
+\usepackage{float}
+\usepackage{setspace}
+
+\setstretch{1.15}
+
+\begin{document}
+
+\begin{titlepage}
+    \centering
+    % Ensure header.png is placed in the diploma-report folder
+    \includegraphics[width=0.6\textwidth]{header.png}\par\vspace{1cm}
+    
+    {\scshape\Large Faculty of Mathematics and Information Science \par}
+    \vspace{1.5cm}
+    
+    {\huge\bfseries Autonomous Exoplanetary Digital Twin\par}
+    \vspace{0.5cm}
+    {\Large Engineering Degree Project Report\par}
+    
+    \vspace{2cm}
+    
+    {\Large\itshape Authors:\par}
+    {\Large Piotr Czechowski \par}
+    {\Large Aleksander Jeżowski \par}
+    
+    \vfill
+    
+    {\large \today\par}
+\end{titlepage}
+
+\begin{abstract}
+The \textit{Autonomous Exoplanetary Digital Twin} is a real-time, browser-based climate surrogate explorer designed to bridge the gap between computationally expensive General Circulation Models (GCMs) and fast, interactive hypothesis generation.
+By integrating deterministically grounded astrophysical equations with modern Machine Learning (ML) techniques-including an Extreme Learning Machine (ELM) surrogate, a Transformer-based Physics-Informed Neural Network (PINNFormer), and a Dual-LLM LangChain orchestration-the user explores exoplanetary climates in seconds rather than weeks. This report outlines the system's architecture, application design, the scientific methodology underpinning the physics engine, and provides a deep dive into the artificial intelligence modules developed for this engineering project.
+\end{abstract}
+
+\tableofcontents
+\newpage
+
+
+
+
+\section{Introduction}
+Modern exoplanetary science relies heavily on 3D General Circulation Models (GCMs), such as ROCKE-3D and ExoCAM, to simulate the climates of newly discovered planets. However, these models require days or weeks of supercomputer time per simulation, rendering rapid parameter-space exploration unfeasible. The Autonomous Exoplanetary Digital Twin solves this problem by using fast ML surrogates inspired by GCM literature, producing approximate climate maps in a matter of seconds.
+
+The core value proposition of our project allows a user to query an AI agent using natural language. The agent autonomously queries the NASA Exoplanet Archive, computes habitability indices (like Earth Similarity Index and SEPHI), runs a climate simulation via our ML pipeline, optionally consults a domain-expert LLM, and returns an interpreted answer alongside an interactive 3D globe. 
+
+\section{System Architecture}
+
+The system follows a strict, highly modular five-layer architecture designed for scalability, maintainability, and scientific validation. 
+
+\subsection{Layered Design}
+\begin{itemize}
+    \item \textbf{Presentation Layer:} A Streamlit-based web interface containing interactive 3D Plotly visualizations, reactive widgets, and a dynamic chat interface.
+    \item \textbf{Orchestration Layer:} A LangChain AgentExecutor utilizing the ReAct (Reasoning and Acting) paradigm to bridge user intent with 11 registered physics and data-fetching tools.
+    \item \textbf{Computation Layer:} The mathematical and ML core, encompassing the ELM Ensemble, PINNFormer 3D, Conditional Tabular GAN (CTGAN), and Isolation Forest algorithms.
+    \item \textbf{Validation Layer:} Pydantic models with strict physics constraints ensuring that boundary conditions (e.g., temperatures above absolute zero, planetary masses preventing stellar fusion) are strongly enforced.
+    \item \textbf{Data Layer:} Integration with the NASA Exoplanet Archive via TAP/ADQL, and a local ChromaDB vector store containing a Retrieval-Augmented Generation (RAG) corpus of over 40 peer-reviewed astrophysics papers.
+\end{itemize}
+
+\subsection{Graceful Degradation Mechanism}
+To ensure robust operation across varying computational environments, the project implements a 5-level graceful degradation manager:
+\begin{itemize}
+    \item \textbf{L0 (Optimal):} Dual-LLM system active with full 3D PINN/ELM inference.
+    \item \textbf{L1 (LLM Unavailable):} Deterministic tools only; AI narratives are bypassed.
+    \item \textbf{L2 (ML Surrogate Failure):} If PyTorch/ELM components fail, the system falls back to analytical radiative calculations.
+    \item \textbf{L3 (Render Timeout):} Replaces computationally heavy 3D Plotly globes with static 2D heatmaps.
+    \item \textbf{L4 (Minimal):} Relies solely on pre-cached data and essential deterministic metrics.
+\end{itemize}
+
+\section{Application Design and User Interface}
+The application frontend is built using Streamlit, comprising over 1,600 lines of code safely utilizing state-caching and lazy dependency loading. The frontend is segmented into distinct tabs tailored to different exploration needs:
+
+\begin{enumerate}
+    \item \textbf{Agent AI:} A conversational interface tracking session history and displaying a `Reasoning Chain'. It provides live feedback on what tools the agent is executing (e.g., querying NASA, computing habitability).
+    \item \textbf{Manual Mode:} Allows granular manual control over stellar temperature, planet radius, mass, semi-major axis, atmospheric conditions, and albedo using UI sliders. Triggers live ``What-If'' simulations.
+    \item \textbf{Catalog:} A tabular browser combining observational data from NASA, Exoplanet.eu, and DACE. 
+    \item \textbf{Science \& System:} Dashboards outlining hardware resource usage, model diagnostics, RAG paper citations, and configuration options to switch between Dual-LLM, Single-LLM, and Deterministic modes.
+\end{enumerate}
+
+
+
+\newpage
+\section{Machine Learning and Artificial Intelligence Modules}
+Our system heavily integrates modern ML architectures to handle natural language understanding, complex PDE solving, and dataset augmentation. 
+
+\subsection{Dual-LLM Orchestration}
+We designed a cooperative multi-agent system powered by LangChain and local Ollama inference. This approach employs two independent models:
+\begin{itemize}
+    \item \textbf{The Orchestrator (Qwen 2.5-14B):} A general-purpose conversational LLM with exceptional system-prompt adherence and tool-calling capabilities. It manages the sequential execution of tools without performing scientific computations directly, mitigating hallucination risks.
+    \item \textbf{The Domain Expert (AstroSage-8B):} A fine-tuned LLaMA-3.1 model specifically trained on astrophysics literature. The orchestrator calls the expert downstream to interpret raw numerical results, classify climate states, and generate rigorous scientific narratives.
+\end{itemize}
+
+\subsection{ELM Ensemble Climate Surrogate}
+To approximate surface temperatures across the planet, we built an Extreme Learning Machine (ELM) ensemble. Traditional neural networks require slow, iterative gradient descent. In contrast, ELMs utilize a single hidden layer with frozen, randomly initialized weights. The output weights are strictly calculated using a closed-form Moore-Penrose pseudoinverse:
+\begin{equation}
+\beta = (H^T H + \lambda I)^{-1} H^T T
+\end{equation}
+where $H$ is the hidden layer output matrix, $T$ is the target matrix, and $\lambda$ is an L2 regularization term to prevent overfitting. Our implementation utilizes an ensemble of $K=10$ independent ELMs, allowing us to compute conformal prediction intervals to provide rigorous uncertainty bounds for the predicted temperatures.
+
+\subsection{PINNFormer 3D Climate Model}
+For a more detailed, phenomenological approximation of 3D atmospheric dynamics without raw GCM compute, we designed a Physics-Informed Neural Network based on the Transformer architecture (PINNFormer). Implemented in PyTorch, the network optimizes an objective function that mathematically penalizes deviations from underlying simplified Navier-Stokes and thermodynamical PDEs. This allows the model to map dynamic interactions between temperature, primitive ocean heat transport, and cloud-fraction feedback.
+
+\subsection{CTGAN Generative Data Augmentation}
+Exoplanetary datasets exhibit extreme class imbalance-out of roughly 6,100 confirmed planets, fewer than 60 are considered potentially habitable. To train robust ML models, we employed a Conditional Tabular Generative Adversarial Network (CTGAN). The CTGAN learns the multi-dimensional distribution of the combined catalog and generates synthetic yet physically valid candidate planets. This oversampling strategy significantly improved the density of the training space for the ELM and anomaly detection modules.
+
+\subsection{Anomaly Detection}
+We implemented an Isolation Forest algorithm paired with Uniform Manifold Approximation and Projection (UMAP) dimensionality reduction. Using inputs such as instellation, equilibrium temperature, and density, the Isolation Forest isolates statistical anomalies. These anomalies often correspond to exciting potentially habitable candidates or errant data points requiring manual review.
+
+\section{Scientific Methodology and Physics Engine}
+The output from the ML models is contextualized and guarded by deterministic astrophysics modules. 
+
+\subsection{Equilibrium Temperature}
+The model computes the baseline radiative balance assuming a balance between absorbed stellar flux and re-emitted thermal radiation:
+\begin{equation}
+T_{eq} = T_\star \sqrt{\frac{R_\star}{f \cdot a}} \cdot (1 - A_B)^{1/4}
+\end{equation}
+where $A_B$ is the Bond albedo, $a$ is the semi-major axis, and $f$ is the redistribution factor parameterizing atmospheric heat transport (e.g., $f=\sqrt{2}$ for tidally locked planets).
+
+\subsection{Earth Similarity Index (ESI)}
+The ESI evaluates planetary similarity strictly based on physical parameters compared to Earth:
+\begin{equation}
+ESI = \prod_{i} \left(1 - \left|\frac{x_i - x_{i,\oplus}}{x_i + x_{i,\oplus}}\right|\right)^{w_i / n}
+\end{equation}
+Using weighted variables for planetary radius, density, escape velocity, and surface temperature, the score maps cleanly from $[0, 1]$.
+
+\subsection{Interior-Surface-Atmosphere (ISA) Interaction}
+We incorporated a simplified heuristic model based on Kite et al. (2009) to estimate tectonic and outgassing probabilities, which strongly influence secondary atmospheric retention and false-positive biosignatures associated with abiotic oxygen accumulations. 
+
+
+
+
+\section{Limitations and Future Work}
+While the ELM and PINN models generate statistically valid distributions and visually plausible maps,
+these approximations should be explicitly benchmarked and fine-tuned against a larger corpus of exact ROCKE-3D outputs.
+Currently, the atmospheric layers remain static across the time domain, and eccentricity is presumed zero.
+Addressing time-dependent variations and eccentric orbits will be priority goals for subsequent scaling of the digital twin. 
+
+
+\section{Proposed Thesis Objectives (Future Development)}
+Given the expansive nature of the \textit{Autonomous Exoplanetary Digital Twin},
+narrowing down the scope to specific features is essential for an engineering diploma thesis.
+We propose the following distinct tracks for future development, from which the final thesis topic can be chosen.
+
+
+
+\subsection{Track 1: Advanced Deep Learning \& Spatiotemporal Climate Modeling}
+\begin{itemize}
+    \item \textbf{Spatiotemporal Vision Transformers (ST-ViT) \& Neural ODEs:} Real climates involve chaotic fluid dynamics and cloud formations over time. By training an ST-ViT or Neural ODE directly on 4D NetCDF files from ROCKE-3D GCM, the system could simulate ''time-stepping'', capturing global teleconnections (e.g., how an equatorial storm affects polar ice formation).
+    \item \textbf{Physics-Informed GANs (PI-GAN) for Stochastic Weather:} Unlike standard PINNs that regress to a smooth average solution, replacing or augmenting the PINN with a Wasserstein GAN with Gradient Penalty would allow synthetic generation of high-resolution, stochastical weather maps ensuring compliance with continuous Navier-Stokes equations via discriminator penalties.
+    \item \textbf{Fourier Neural Operators (FNO) or Kolmogorov-Arnold Networks (KAN):} Developing next-generation, resolution-invariant PDE operators using FNOs or KANs as replacements for the current MLP-based or Transformer-based PINN parameterizations.
+\end{itemize}
+
+\subsection{Track 2: Astrobiology, Spectroscopy \& Stellar Interactions}
+\begin{itemize}
+    \item \textbf{Transition to Atmospheric Retrieval (Spectroscopy):} Transitioning from predicting surface temperatures to predicting transmission spectra. By integrating the NASA Planetary Spectrum Generator (PSG) API and implementing a ''Spectrum Transformer'' (SpT) or Bayesian Neural Network, the digital twin could ingest a light curve and predict the atmospheric mole fractions of $\text{H}_2\text{O}$, $\text{CH}_4$, and $\text{O}_3$.
+    \item \textbf{Red Dwarf Flare Survival Simulator:} Using libraries like \textit{lightkurve} and \textit{AltaiPony} to pull raw TESS time-series data, the model can calculate Flare Frequency Distributions (FFD) of host stars. This would drive a hydrodynamic escape module simulating atmospheric mass loss over millions of years due to XUV flares.
+    \item \textbf{Deep Prebiotic Chemistry (Origin of Life Simulator):} Moving beyond basic habitability (liquid water) to prebiotic probability. Implementing a specialized LLM agent connected to a chemical reaction network database (e.g., ChemCrow, ChemOrigins) to solve Poisson kinetic matrices, predicting the probability of RNA-like polymer stabilization in simulated hydrothermal vents.
+\end{itemize}
+
+\subsection{Track 3: Uncertainty Quantification \& Representation Learning}
+\begin{itemize}
+    \item \textbf{Gaussian Process Regression (GPR):} Implementing GPR to complement the ELM ensemble. GPR natively provides both prediction values and standard deviation (confidence intervals) for every pixel in a climate temperature map without relying strictly on ensemble variations, guiding active learning by identifying unconstrained regions in parameter space.
+    \item \textbf{Variational Autoencoders (VAE) for Planetary Latent Space:} Building a neural encoder-decoder framework to cleanly map highly dimensional planetary data into a continuous 3D latent space. This would allow topological traversal and interpolation between known planets (e.g., synthesizing conditions halfway between TRAPPIST-1e and Proxima Centauri b).
+    \item \textbf{UMAP \& HDBSCAN for Exoplanet Taxonomy (Clustering):} Integrating Uniform Manifold Approximation (UMAP) and Hierarchical Density-Based Spatial Clustering (HDBSCAN) to autonomously discover non-linear taxonomic classifications of exoplanets from multidimensional catalog features. Unlike manual habitability thresholding, this unsupervised approach dynamically identifies new physical families of exoplanets and flags deep-space anomalies.
+\end{itemize}
+
+\section{Conclusion}
+The \textit{Autonomous Exoplanetary Digital Twin} represents a cohesive integration of advanced software engineering patterns, physics engines, and state-of-the-art Artificial Intelligence. By architecting a Dual-LLM framework operating on top of custom ELMs, PyTorch PDE solvers, and tabular GANs, the system achieves near-instantaneous surrogate climate models and intelligent analysis. It proves the feasibility of bringing supercomputer-grade hypotheses down to interactive web-scale applications to accelerate the field of exoplanetary characterization.
+
+\end{document}
