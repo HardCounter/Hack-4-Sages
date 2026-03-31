@@ -18,7 +18,6 @@
 
 % Section formatting to match the Word document style
 \titleformat{\section}{\normalfont\Large\bfseries}{\thesection.}{1em}{}
-\titleformat{\subsection}{\normalfont\large\bfseries}{\thesubsection.}{1em}{}
 
 \begin{document}
 
@@ -27,18 +26,10 @@
 % -------------------------------------------------------------------
 \begin{titlepage}
     \begin{center}
-        % Header with placeholders for WUT and Faculty logos
-% Header Image
+        % Header with MiNI logo
         \includegraphics[width=\textwidth]{proj/header.png} \\[1cm]
         
         \vspace{2cm}
-        % Adjusted spacing to account for the image
-        % \begin{tabular}{c}
-        %     \textbf{\Large WARSAW UNIVERSITY OF TECHNOLOGY} \\[0.2cm]
-        %     \textbf{\Large Faculty of Mathematics} \\[0.2cm]
-        %     \textbf{\Large and Information Science}
-        % \end{tabular}        
-        % \vspace{3cm}
         
         \textbf{\LARGE Artificial Intelligence Fundamentals} \\[1cm]
         \textbf{\Huge Exoplanet Visualization Agent} \\[2cm]
@@ -71,8 +62,8 @@
         \bottomrule
     \end{tabularx}
 \end{table}
-\newpage
 
+\newpage
 
 % -------------------------------------------------------------------
 % TABLE OF CONTENTS
@@ -85,16 +76,13 @@
 % -------------------------------------------------------------------
 \section{Description of a problem}
 
-Our project focuses on creating an Autonomous Exoplanetary Digital Twin to quickly evaluate the climate and habitability of exoplanets. 
+Our project focuses on creating an Autonomous Exoplanetary Digital Twin to quickly evaluate the climate and habitability of exoplanets. To prepare the final solution, we must address the fundamental challenge in astrobiology: determining which of the 5,700+ confirmed exoplanets can support life [2]. Reconstructing a planet's climate profile, including surface temperature distribution and habitability zones, requires complex calculations that involve solving coupled atmospheric and radiative transfer equations.
 
-To prepare the final solution, we must address the fundamental challenge in astrobiology: determining which of the 5,700+ confirmed exoplanets can support life. Reconstructing a planet's climate profile-including surface temperature distribution and habitability zones-requires complex calculations. 
+The main goal is to evaluate habitability using General Circulation Models (GCMs). However, running a standard 3D GCM (like NASA's ROCKE-3D) for a single planetary configuration takes 2 to 7 days on a supercomputer. This computational cost makes it impossible to systematically scan thousands of discovered exoplanets. The core idea is to bypass these heavy computations by using AI algorithms and Machine Learning to act as physics-informed surrogate models [1]. Our system takes raw exoplanet data (stellar host temperature, radius, orbital distance, etc.) and generates surface temperature maps and scientific habitability metrics in seconds rather than days, while answering critical questions like ``What is the climate state?'' and ``What is the false-positive risk for biosignatures?''
 
-In the first part, the main goal is to evaluate habitability using General Circulation Models (GCMs). However, running a standard 3D GCM (like NASA's ROCKE-3D) for a single planetary configuration takes 2 to 7 days on a supercomputer. This computational cost makes it impossible to systematically scan thousands of discovered exoplanets.
+Figure~\ref{fig:proj-desc} shows the high-level data transition from raw exoplanet observations to the output of our Exoplanet Visualization Agent.
 
-The penultimate step is to bypass these heavy computations by using AI algorithms and Machine Learning to act as physics-informed surrogate models. We need a system that can take raw exoplanet data (stellar host temperature, radius, orbital distance, etc.) and generate 3D surface temperature maps and scientific habitability metrics in seconds rather than days, while answering critical questions like "What is the climate state (Eyeball, Lobster, or Greenhouse)?" and "What is the false-positive risk for biosignatures?"
-
-
-\begin{figure}[htbp]
+\begin{figure}[H]
     \centering
     \includegraphics[width=0.9\textwidth]{proj/diag.png}
     \caption{Visualizing the data transition to our Exoplanet Visualization Agent.}
@@ -107,11 +95,18 @@ The penultimate step is to bypass these heavy computations by using AI algorithm
 % -------------------------------------------------------------------
 \section{An analysis of a problem}
 
-The first step is addressing the extreme class imbalance in planetary data.
-In the NASA Exoplanet Archive, there are roughly 5,700 confirmed planets, but only about 60 are considered potentially habitable (having an Earth Similarity Index $>$ 0.8). This extreme imbalance ($\approx 1:380$ ratio) causes standard ML models to suffer from statistical collapse, where they simply learn to predict the majority class and fail to reproduce complex climate topologies like the "eyeball" state.
+The first challenge is extreme class imbalance in planetary data. In the NASA Exoplanet Archive [6], there are roughly 5,700 confirmed planets, but only about 60 are considered potentially habitable (having an Earth Similarity Index $>$ 0.8 [3]). This extreme imbalance ($\approx 1{:}380$ ratio) causes standard ML models to suffer from statistical collapse, where they simply learn to predict the majority class and fail to reproduce complex climate topologies like the ``eyeball'' state. To overcome this, we employ Conditional Tabular GAN (CTGAN) [8] to generate physically valid synthetic habitable planets that balance the training set.
 
-Another major issue is physical hallucinations. Using Large Language Models (LLMs) to interpret or generate scientific claims often leads to non-physical results (e.g., negative Kelvin temperatures or impossible mass-radius ratios). Therefore, the system requires strict programmatic guardrails (validators) to ensure thermodynamic constraints and energy conservation are preserved.
+Another major issue is physical hallucinations. Using Large Language Models (LLMs) to interpret or generate scientific claims often leads to non-physical results such as negative Kelvin temperatures or impossible mass-radius ratios [4]. Therefore, the system requires strict programmatic guardrails (Pydantic validators) to ensure thermodynamic constraints and energy conservation are preserved throughout the entire inference pipeline.
 
+Figure~\ref{fig:habitable-zone} shows the habitable zone computation from our application, illustrating how a planet's orbital distance determines whether it falls within the habitable range of its host star.
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=0.8\textwidth]{app-photos/habitable-zone.png}
+    \caption{Habitable zone visualization showing the planet's position relative to the ``too hot,'' habitable, and extended habitable regions based on stellar effective temperature [2].}
+    \label{fig:habitable-zone}
+\end{figure}
 \newpage
 
 
@@ -120,31 +115,89 @@ Another major issue is physical hallucinations. Using Large Language Models (LLM
 % -------------------------------------------------------------------
 \section{Existing solutions}
 
-There are existing solutions for modeling exoplanetary climates and habitability, divided mainly into two extremes.
+There are existing solutions for modeling exoplanetary climates and habitability, divided mainly into two extremes. On one end, high-fidelity 3D General Circulation Models (GCMs) like NASA ROCKE-3D and the LMD Generic GCM solve Navier-Stokes equations for atmospheric flow over a 3D grid with a time-step of approximately 30 minutes until equilibrium is reached (simulating $\sim 10^4$ years). While highly accurate, they require HPC clusters and days of computation per planet. On the other end, 1D analytical models and simple statistical indices like the Earth Similarity Index (ESI) [3] or the Surface Exoplanetary Planetary Habitability Index (SEPHI) [5] are very fast to compute but lack the spatial depth required to analyze localized climate states, such as terminator zone habitability on tidally locked planets.
 
-For example, high-fidelity 3D General Circulation Models (GCMs) like NASA ROCKE-3D and the LMD Generic GCM. These models solve Navier-Stokes equations for atmospheric flow over a 3D grid with a time-step of ~30 minutes until equilibrium is reached (simulating $\sim 10^4$ years). While highly accurate, they require HPC clusters and days of computation per planet.
+Our approach fills the gap between these two extremes by using Extreme Learning Machines (ELM) [1] as fast surrogate models that can generate a full 2D surface temperature map in under 100 milliseconds on a standard CPU, while maintaining physically meaningful outputs through built-in validation layers.
 
-On the other hand, we have 1D analytical models and simple statistical indices like the Earth Similarity Index (ESI) or the Surface Exoplanetary Planetary Habitability Index (SEPHI). These are very fast to compute but lack the spatial depth required to analyze localized climate states, such as terminator zone habitability on tidally locked planets.
+Figure~\ref{fig:existing-comparison} shows the AI-driven architecture diagram of our agent, illustrating how the orchestrator LLM coordinates deterministic physics tools, the ELM climate surrogate, and the NASA data retrieval client to produce validated scientific outputs.
 
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=0.85\textwidth]{proj/diagram.png}
+    \caption{Architecture diagram of the autonomous exoplanet agent: the Qwen 2.5-14B orchestrator coordinates physics tools, the ELM surrogate, and the NASA archive client, while AstroSage-8B provides domain-expert interpretation.}
+    \label{fig:existing-comparison}
+\end{figure}
 \newpage
 
 
+% -------------------------------------------------------------------
+% 4. DATASETS
+% -------------------------------------------------------------------
+\section{Datasets}
+
+The data foundation of our system is built by merging multiple publicly available astronomical archives into a unified, normalized catalog. The primary source is the NASA Exoplanet Archive [6], which contains over 5,700 confirmed exoplanets with parameters such as orbital period, semi-major axis, planet radius, planet mass, equilibrium temperature, and stellar effective temperature. We query this archive programmatically using the Table Access Protocol (TAP) with ADQL queries to retrieve up-to-date planetary and stellar parameters.
+
+We complement the NASA data with the Exoplanet Encyclopaedia (exoplanet.eu) [7], which independently catalogs discovered exoplanets and often includes parameters not yet available in the NASA archive. Additionally, we ingest data from the DACE platform (Data and Analysis Center for Exoplanets) operated by the University of Geneva, which provides high-precision radial velocity and transit photometry measurements from instruments such as CHEOPS. Finally, we incorporate stellar parallaxes and photometric data from the ESA Gaia Data Release 3 (Gaia DR3) to improve stellar luminosity estimates and the derived habitable zone boundaries [2].
+
+Our catalog-building pipeline normalizes column names and units across all four sources, performs de-duplication with NASA-priority conflict resolution, and applies physical validity filters (for example, rejecting entries where planet mass exceeds the deuterium-burning limit of $\sim 13$ Jupiter masses [4]). The resulting unified catalog serves as the input for ELM training, CTGAN augmentation, anomaly detection, and the RAG citation index.
+
+Figure~\ref{fig:catalog-pipeline} shows the complete catalog ingestion and augmentation pipeline, from the four astronomical archives through schema normalization and de-duplication to the downstream analytics modules.
+
+\begin{figure}[H]
+    \centering
+    \resizebox{\textwidth}{!}{%
+    \begin{tikzpicture}[
+        node distance=7mm and 8mm,
+        >={Latex[length=2mm]},
+        src/.style={rectangle, rounded corners, draw=black, align=center, inner sep=3pt, text width=2.4cm},
+        proc/.style={rectangle, rounded corners, draw=black, align=center, inner sep=3pt, text width=3.5cm},
+        outputbox/.style={rectangle, rounded corners, draw=black, align=center, inner sep=3pt, text width=3.6cm},
+        arrow/.style={-Latex, thick}
+    ]
+    \node[src] (nasa) {NASA TAP};
+    \node[src, below=of nasa] (eu) {Exoplanet.eu};
+    \node[src, below=of eu] (dace) {DACE CHEOPS};
+    \node[src, below=of dace] (gaia) {Gaia DR3};
+
+    \node[proc, right=15mm of eu] (norm) {Schema normalization};
+    \node[proc, right=of norm] (comb) {combined\_catalog.py\\de-duplication with NASA priority};
+
+    \node[outputbox, above right=2mm and 12mm of comb] (anom) {Anomaly detection\\Isolation Forest + UMAP};
+    \node[outputbox, right=12mm of comb] (ctgan) {CTGAN training\\synthetic habitable planets};
+    \node[outputbox, below right=2mm and 12mm of comb] (rag) {RAG context metadata};
+
+    \node[proc, right=12mm of ctgan] (filter) {Physics filtering + validation};
+    \node[outputbox, right=12mm of filter] (dash) {Real vs synthetic\\comparison dashboard};
+
+    \draw[arrow] (nasa.east) -- (norm.west);
+    \draw[arrow] (eu.east) -- (norm.west);
+    \draw[arrow] (dace.east) -- (norm.west);
+    \draw[arrow] (gaia.east) -- (norm.west);
+    \draw[arrow] (norm) -- (comb);
+
+    \draw[arrow] (comb) -- (anom);
+    \draw[arrow] (comb) -- (ctgan);
+    \draw[arrow] (comb) -- (rag);
+    \draw[arrow] (ctgan) -- (filter);
+    \draw[arrow] (filter) -- (dash);
+    \end{tikzpicture}%
+    }
+    \caption{Catalog ingestion and augmentation pipeline from multi-archive sources to anomaly analytics and synthetic-data diagnostics.}
+    \label{fig:catalog-pipeline}
+\end{figure}
+\newpage
+
 
 % -------------------------------------------------------------------
-% 4. THE DESCRIPTION OF THE PREFERRED SOLUTION
+% 5. THE DESCRIPTION OF THE PREFERRED SOLUTION
 % -------------------------------------------------------------------
 \section{The description of the preferred solution}
 
-\textbf{Programming Language:} Python 3.10+ \\
-\textbf{The most important libraries:} Streamlit (GUI), scikit-elm, PyTorch, CTGAN, LangChain, Ollama, Plotly. \\
+For our digital-twin-inspired surrogate, we use a multi-layered AI architecture combining generative models, fast ML surrogates, and strict physical guardrails. The core AI pipeline consists of three main components. First, the Extreme Learning Machine (ELM) ensemble [1] serves as the default fast climate engine, generating a full $32 \times 64$ surface temperature map from 8 planetary input features in under 100 milliseconds. Second, a Conditional Tabular GAN (CTGAN) [8] addresses the severe class imbalance in the training data by generating large sets of physically valid synthetic habitable planets. Third, an experimental Transformer-based Physics-Informed Neural Network (PINNFormer 3-D) provides richer climate fields by solving a steady-state coupled atmosphere-ocean PDE system with configurable physical presets.
 
-For our digital-twin-inspired surrogate, we use a multi-layered architecture combining generative AI, fast ML surrogates, and strict physical guardrails. 
+For scientific grounding, we employ a hybrid Retrieval-Augmented Generation (RAG) pipeline using ChromaDB over 40 peer-reviewed astrobiology papers, combining sentence-transformer semantic retrieval with TF-IDF keyword retrieval through Reciprocal Rank Fusion [9]. For catalog diagnostics, we apply Isolation Forest-based anomaly detection with UMAP 2D projection to analyze outliers in both real and synthetic samples. All data passes through Pydantic validators to reject unphysical inputs or outputs, such as preventing inputs exceeding the deuterium-burning limit of $\sim 13$ Jupiter masses [4].
 
-Our application is built using Streamlit, providing an interactive 5-tab web interface. Users can query real observational data from the NASA Exoplanet Archive using Table Access Protocol (TAP/ADQL). In addition, our catalog-building pipeline merges multiple public data sources (NASA, Exoplanet.eu, DACE, and Gaia) into a normalized table used for analysis and training workflows. The core calculation engine computes physics-based habitability indices, such as equilibrium temperature ($T_{eq}$), ESI, SEPHI scores, and Kopparapu (2013) Habitable Zone boundaries.
-
-To handle AI orchestration, we use a dual-LLM setup via LangChain and local Ollama inference. The system uses Qwen 2.5-14B as an orchestrator for tool calling, and AstroSage-Llama-3.1-8B as a domain expert to interpret the raw numerical outputs into scientific narratives. We also support runtime modes for different hardware profiles: Dual-LLM mode, Single-LLM mode, and Deterministic mode (without LLM narrative generation). Crucially, all data passes through Pydantic validators to reject unphysical inputs or outputs (e.g., preventing inputs exceeding the deuterium-burning limit of $\sim 13$ Jupiter masses).
-
-To improve reliability, we implemented a graceful degradation and fallback chain. If higher-level components are unavailable (e.g., LLM runtime or selected surrogate), the application degrades to deterministic physics tools and simpler climate approximations while preserving result availability and UI continuity.
+Figure~\ref{fig:arch} shows the high-level architecture of the Autonomous Exoplanetary Digital Twin, organized into five functional layers from the user-facing presentation down to the data ingestion and citation modules.
 
 \begin{figure}[H]
     \centering
@@ -200,203 +253,96 @@ To improve reliability, we implemented a graceful degradation and fallback chain
 
     \end{tikzpicture}
     \caption{The high-level architecture of the Autonomous Exoplanetary Digital Twin.}
-\end{figure}
-
-\subsection*{Operational data-flow diagrams}
-
-\begin{figure}[H]
-    \centering
-    \resizebox{\textwidth}{!}{%
-    \begin{tikzpicture}[
-        node distance=6mm,
-        >={Latex[length=2mm]},
-        flow/.style={rectangle, rounded corners, draw=black, align=center, inner sep=4pt, text width=5.8cm},
-        decision/.style={diamond, draw=black, align=center, aspect=2.0, inner sep=1pt, text width=2.2cm},
-        arrow/.style={-Latex, thick}
-    ]
-    \node[flow] (a) {User input: natural language query or manual sliders};
-    \node[flow, below=of a] (b) {PlanetaryParameters validation};
-    \node[flow, below=of b] (c) {Deterministic physics: $T_{eq}$, flux, ESI, SEPHI, HZ, ISA, biosignature risk};
-    \node[flow, below=of c] (d) {SimulationOutput validation};
-    \node[decision, below=7mm of d] (e) {Climate model path};
-    \node[flow, below left=9mm and 18mm of e] (f) {Primary: ELM ensemble map prediction};
-    \node[flow, below right=9mm and 18mm of e] (g) {Fallback: PINNFormer 3-D or analytical $\cos^{1/4}$ model};
-    \node[flow, below=13mm of e] (h) {Temperature-map safety checks: no NaN, no negative, $\leq 5000$ K};
-    \node[flow, below=of h] (i) {Visualization: 3-D globe or 2-D heatmap};
-    \node[flow, below=of i] (j) {Interpretation layer: climate class + narrative + review};
-    \node[flow, below=of j] (k) {UI cards, plots, exports};
-
-    \draw[arrow] (a) -- (b);
-    \draw[arrow] (b) -- (c);
-    \draw[arrow] (c) -- (d);
-    \draw[arrow] (d) -- (e);
-    \draw[arrow] (e) -- node[above left, font=\scriptsize] {Primary} (f);
-    \draw[arrow] (e) -- node[above right, font=\scriptsize] {Fallback} (g);
-    \draw[arrow] (f) -- (h);
-    \draw[arrow] (g) -- (h);
-    \draw[arrow] (h) -- (i);
-    \draw[arrow] (i) -- (j);
-    \draw[arrow] (j) -- (k);
-    \end{tikzpicture}%
-    }
-    \caption{End-to-end data flow from user query to simulation output and validated visualization.}
-    \label{fig:user_to_simulation_flow}
-\end{figure}
-
-\begin{figure}[H]
-    \centering
-    \resizebox{\textwidth}{!}{%
-    \begin{tikzpicture}[
-        node distance=7mm and 8mm,
-        >={Latex[length=2mm]},
-        src/.style={rectangle, rounded corners, draw=black, align=center, inner sep=3pt, text width=2.4cm},
-        proc/.style={rectangle, rounded corners, draw=black, align=center, inner sep=3pt, text width=3.5cm},
-        outputbox/.style={rectangle, rounded corners, draw=black, align=center, inner sep=3pt, text width=3.6cm},
-        arrow/.style={-Latex, thick}
-    ]
-    \node[src] (nasa) {NASA TAP};
-    \node[src, below=of nasa] (eu) {Exoplanet.eu};
-    \node[src, below=of eu] (dace) {DACE CHEOPS};
-    \node[src, below=of dace] (gaia) {Gaia DR3};
-
-    \node[proc, right=15mm of eu] (norm) {Schema normalization};
-    \node[proc, right=of norm] (comb) {combined\_catalog.py\\de-duplication with NASA priority};
-
-    \node[outputbox, above right=2mm and 12mm of comb] (anom) {Anomaly detection\\Isolation Forest + UMAP};
-    \node[outputbox, right=12mm of comb] (ctgan) {CTGAN training\\synthetic habitable planets};
-    \node[outputbox, below right=2mm and 12mm of comb] (rag) {RAG context metadata};
-
-    \node[proc, right=12mm of ctgan] (filter) {Physics filtering + validation};
-    \node[outputbox, right=12mm of filter] (dash) {Real vs synthetic\\comparison dashboard};
-
-    \draw[arrow] (nasa.east) -- (norm.west);
-    \draw[arrow] (eu.east) -- (norm.west);
-    \draw[arrow] (dace.east) -- (norm.west);
-    \draw[arrow] (gaia.east) -- (norm.west);
-    \draw[arrow] (norm) -- (comb);
-
-    \draw[arrow] (comb) -- (anom);
-    \draw[arrow] (comb) -- (ctgan);
-    \draw[arrow] (comb) -- (rag);
-    \draw[arrow] (ctgan) -- (filter);
-    \draw[arrow] (filter) -- (dash);
-    \end{tikzpicture}%
-    }
-    \caption{Catalog ingestion and augmentation pipeline from multi-archive sources to anomaly analytics and synthetic-data diagnostics.}
-    \label{fig:catalog_ingestion_pipeline}
-\end{figure}
-
-\begin{figure}[H]
-    \centering
-    \begin{tikzpicture}[
-        node distance=7mm,
-        >={Latex[length=2mm]},
-        level/.style={rectangle, rounded corners, draw=black, align=center, inner sep=4pt, text width=0.78\textwidth},
-        arrow/.style={-Latex, thick}
-    ]
-    \node[level] (l0) {L0: Dual-LLM available};
-    \node[level, below=of l0] (l0b) {L0b: Single-LLM mode};
-    \node[level, below=of l0b] (l1) {L1: Deterministic mode if Ollama is unavailable};
-    \node[level, below=of l1] (l2) {L2: Climate fallback if ELM or PINN fails};
-    \node[level, below=of l2] (l3) {L3: Visualization fallback from 3-D to 2-D};
-    \node[level, below=of l3] (l4) {L4: Data fallback to NASA/local cache only};
-
-    \draw[arrow] (l0) -- (l0b);
-    \draw[arrow] (l0b) -- (l1);
-    \draw[arrow] (l1) -- (l2);
-    \draw[arrow] (l2) -- (l3);
-    \draw[arrow] (l3) -- (l4);
-    \end{tikzpicture}
-    \caption{Runtime graceful-degradation cascade used to preserve availability under component failures.}
-    \label{fig:degradation_cascade}
+    \label{fig:arch}
 \end{figure}
 \newpage
 
 
 
-
 % -------------------------------------------------------------------
-% 5. IMPLEMENTATION OF THE AI PART
+% 6. IMPLEMENTATION OF THE AI PART
 % -------------------------------------------------------------------
 \section{Implementation of the AI part}
 
-The AI implementation is not a single model. It is a coordinated set of deterministic and learned modules combined through a validated execution pipeline.
+The AI implementation is a coordinated set of deterministic and learned modules combined through a validated execution pipeline. The central component is the Extreme Learning Machine (ELM) [1], a single-hidden-layer feedforward neural network where input-to-hidden weights are randomly initialized and frozen, while the output-layer weights are computed analytically via the regularized Moore-Penrose pseudoinverse. This design eliminates iterative backpropagation training entirely, enabling the model to be fitted in a single matrix operation and to produce predictions in under 100 milliseconds.
 
-\subsection{Module-level implementation breakdown}
-
-The module-level implementation is organized as a coordinated pipeline in which \path{modules/astro_physics.py} provides deterministic astrophysics calculations
-such as equilibrium temperature ($T_{eq}$), stellar flux, Earth-normalized flux, ESI and SEPHI criteria, habitable-zone boundaries, habitable surface fraction, ISA-inspired interaction heuristics, biosignature false-positive risk heuristics,
-and composition helpers, while \path{modules/elm_surrogate.py} serves as the default fast climate engine by preparing planetary features, solving the output layer analytically in Moore-Penrose style,
-performing ensemble inference for variance reduction, estimating prediction intervals, and loading serialized artifacts like \path{models/elm_ensemble.pkl};
-in parallel, \path{modules/pinnformer3d.py} provides an experimental transformer-based physics-informed alternative with configurable presets
-(including greenhouse, ocean heat transport, cloud, tidal, ice-albedo, and advection effects) for richer field generation when available, \path{modules/data_augmentation.py} and \path{modules/anomaly_detection.py} 
-handle CTGAN-based synthetic data generation with physical post-filtering plus Isolation Forest and UMAP-based anomaly diagnostics, \path{modules/agent_setup.py} and \path{modules/rag_citations.py} provide tool-calling orchestration and citation-grounded retrieval over a curated astrobiology corpus, and \path{modules/validators.py} enforces strict constraints on stellar, planetary, and simulation objects so unphysical values are blocked before they propagate downstream.
-\newline
-
-
-\begin{figure}[H]
-    \centering
-    \begin{tikzpicture}[
-        node distance=8mm and 10mm,
-        >={Latex[length=2mm]},
-        box/.style={rectangle, rounded corners, draw=black, align=center, inner sep=4pt, text width=0.56\textwidth},
-        decision/.style={rectangle, draw=black, align=center, inner sep=4pt, text width=0.56\textwidth},
-        side/.style={rectangle, rounded corners, draw=black, align=center, inner sep=3pt, text width=0.27\textwidth},
-        arrow/.style={-Latex, thick},
-        dashedarrow/.style={-Latex, thick, dashed}
-    ]
-
-    \node[box] (a) {Input: 8,192 collocation points on spherical geometry};
-    \node[box, below=of a] (b) {PINNFormer 3-D core};
-    \node[decision, below=of b] (c) {Configurable physics presets};
-    \node[box, below=of c] (d) {Solve steady-state coupled atmosphere-ocean PDE system\\(greenhouse, ocean heat transport, cloud, tidal, ice-albedo, advection)};
-    \node[box, below=of d] (e) {Output: richer climate fields};
-
-    \node[side, right=8mm of b] (f) {Loss function calculation};
-    \node[side, below=of f] (g) {Boundary conditions};
-    \node[side, below=of g] (h) {Weighted residuals};
-    \node[side, below=of h] (i) {Atmosphere, ocean heat transport, cloud, and ice fractions};
-
-    \draw[arrow] (a) -- (b);
-    \draw[arrow] (b) -- (c);
-    \draw[arrow] (c) -- (d);
-    \draw[arrow] (d) -- (e);
-
-    \draw[dashedarrow] (b.east) -- (f.west);
-    \draw[arrow] (f) -- (g);
-    \draw[arrow] (g) -- (h);
-    \draw[arrow] (h) -- (i);
-
-    \end{tikzpicture}
-    \caption{PINNFormer 3-D execution flow and physics-constrained loss structure}
-    \label{fig:pinnformer_flow}
-\end{figure}
-
-
-
-
-
-
-\subsection{Core AI implemenation details}
-
-
-For climate map generation, we use an Extreme Learning Machine (ELM) ensemble, a single-hidden-layer feedforward neural network where input weights are frozen and output weights are solved analytically via the Moore-Penrose pseudoinverse:
+The ELM output-weight matrix is computed as:
 \begin{equation}
 \beta = \left(H^T H + \frac{I}{C}\right)^{-1} H^T T
 \label{eq:elm_output_weights}
 \end{equation}
-where $\beta$ is the output-weight matrix, $H$ is the hidden-layer activation matrix, $H^T$ denotes the transpose of $H$, $I$ is the identity matrix, $C$ is the regularization coefficient, and $T$ is the target output matrix; we use an ensemble of $K=10$ independent ELM models (500 hidden neurons each) to predict a flattened $32 \times 64$ dimensional temperature map from 8 planetary input features, and to address class imbalance we train a Conditional Tabular GAN (CTGAN) with log1p transforms on heavy-tailed features and conditioning on a binary habitable label to generate large sets of physically valid synthetic planets for ELM training; we also include an experimental Transformer-based Physics-Informed Neural Network (PINNFormer 3-D) that uses 8,192 collocation points on spherical geometry to solve a steady-state coupled atmosphere-ocean PDE system with boundary-condition and weighted-residual losses for atmosphere, ocean heat transport, cloud, and ice fractions; for scientific grounding we use a hybrid Retrieval-Augmented Generation pipeline with ChromaDB over 40 peer-reviewed astrobiology papers, combining sentence-transformer semantic retrieval with TF-IDF keyword retrieval through Reciprocal Rank Fusion; for catalog diagnostics we apply Isolation Forest-based anomaly detection with UMAP 2D projection to analyze outliers and structure in both real and synthetic samples; and for reliability we combine runtime validators with targeted automated tests and dedicated diagnostics that benchmark ELM predictions against synthetic GCM reference profiles and compare CTGAN-generated distributions with real catalog data.
+where $\beta$ denotes the output-weight matrix mapping hidden activations to predicted temperatures, $H$ is the hidden-layer activation matrix whose rows correspond to training samples and columns to hidden neurons, $H^T$ is the transpose of $H$, $I$ is the identity matrix used for Tikhonov regularization, $C$ is the regularization coefficient controlling the bias-variance trade-off, and $T$ is the target output matrix containing the reference temperature maps.
+
+We use an ensemble of $K=10$ independent ELM models, each with 500 hidden neurons, to predict a flattened $32 \times 64$ dimensional temperature map from 8 planetary input features (stellar effective temperature, stellar radius, orbital semi-major axis, planet radius, planet mass, eccentricity, albedo, and atmospheric thickness). The ensemble averaging reduces prediction variance and provides uncertainty estimates through inter-model disagreement.
+
+Figure~\ref{fig:elm-scheme} shows the architecture of a single ELM model, illustrating the flow from planetary input features through the randomly initialized hidden layer to the analytically solved output layer that produces the surface temperature map.
+
+\begin{figure}[H]
+    \centering
+    \begin{tikzpicture}[
+        node distance=10mm and 18mm,
+        >={Latex[length=2mm]},
+        neuron/.style={circle, draw=black, minimum size=8mm, inner sep=0pt, font=\scriptsize},
+        layer label/.style={font=\small\bfseries, align=center},
+        arrow/.style={-Latex, thick}
+    ]
+
+    % Input layer
+    \node[layer label] at (0, 3.2) {Input Layer\\(8 features)};
+    \foreach \i/\label in {1/$T_\star$, 2/$R_\star$, 3/$a$, 4/$R_p$, 5/$M_p$, 6/$e$, 7/$A$, 8/$d_{atm}$} {
+        \node[neuron] (I\i) at (0, {3 - 0.75*\i}) {\label};
+    }
+
+    % Hidden layer
+    \node[layer label] at (3.5, 3.2) {Hidden Layer\\(500 neurons)};
+    \foreach \j in {1,...,5} {
+        \node[neuron] (H\j) at (3.5, {2.5 - 0.9*\j}) {};
+    }
+    \node at (3.5, -3.0) {\vdots};
+
+    % Output layer
+    \node[layer label] at (7, 3.2) {Output Layer\\($32\!\times\!64$ map)};
+    \foreach \k in {1,...,4} {
+        \node[neuron] (O\k) at (7, {1.8 - 0.9*\k}) {};
+    }
+    \node at (7, -2.5) {\vdots};
+
+    % Connections input -> hidden
+    \foreach \i in {1,...,8} {
+        \foreach \j in {1,...,5} {
+            \draw[gray, thin] (I\i) -- (H\j);
+        }
+    }
+
+    % Connections hidden -> output
+    \foreach \j in {1,...,5} {
+        \foreach \k in {1,...,4} {
+            \draw[gray, thin] (H\j) -- (O\k);
+        }
+    }
+
+    % Labels for weight matrices
+    \node[font=\footnotesize, align=center] at (1.75, -4.2) {$W$ (random,\\frozen)};
+    \node[font=\footnotesize, align=center] at (5.25, -4.2) {$\beta$ (solved\\analytically)};
+
+    \end{tikzpicture}
+    \caption{Architecture of a single ELM model: input planetary features pass through a randomly weighted hidden layer with sigmoid activation, and the output weights $\beta$ are solved analytically using Equation~\ref{eq:elm_output_weights}.}
+    \label{fig:elm-scheme}
+\end{figure}
+
+To address the data imbalance, we train a Conditional Tabular GAN (CTGAN) [8] with log1p transforms on heavy-tailed features and conditioning on a binary habitable label. The CTGAN generates large sets of physically valid synthetic planets that balance the training set for the ELM ensemble. All generated samples pass through physical post-filters to ensure thermodynamic validity (for example, $T_{eq} \in [10, 4000]$~K).
+
+We also include an experimental Transformer-based Physics-Informed Neural Network (PINNFormer 3-D) that uses 8,192 collocation points on spherical geometry to solve a steady-state coupled atmosphere-ocean PDE system. The PINNFormer employs boundary-condition and weighted-residual losses covering atmosphere, ocean heat transport, cloud dynamics, and ice-albedo feedback. For scientific grounding, a hybrid RAG pipeline with ChromaDB [9] over 40 peer-reviewed papers combines semantic and TF-IDF retrieval through Reciprocal Rank Fusion to provide citation-backed scientific narratives.
 \newpage
 
 
 
-
 % -------------------------------------------------------------------
-% 6. SIMULATION RESULTS FROM THE APPLICATION
+% 7. SIMULATION RESULTS FROM THE APPLICATION
 % -------------------------------------------------------------------
 \section{Simulation results from the application}
 
-This section reports observed outcomes across four representative scenarios and summarizes their habitability implications.
+This section reports observed outcomes across four representative scenarios and summarizes their habitability implications. Figure~\ref{fig:esi_dashboard} shows the climate simulation dashboard for an Earth-like configuration.
 
 \begin{table}[H]
     \centering
@@ -412,19 +358,7 @@ This section reports observed outcomes across four representative scenarios and 
     \end{tabularx}
 \end{table}
 
-
-The simulation results from our application demonstrate massive computational speedups.
-The ELM Ensemble generates a full $32 \times 64$ climate surface-temperature map in $<100$ milliseconds on a standard CPU,
-effectively bypassing the multi-day bottleneck of GCMs. 
-Overall, the scenario suite demonstrates that the system distinguishes plausibly habitable, marginal, and non-habitable regimes while preserving rapid inference and interpretable diagnostics.
-\newline
-
-
-
-\textbf{Second Scenario: Tidally locked habitable candidate}
-\newline
-A tidally locked candidate yielded $T_{eq}=272$ K, ESI $=0.944$, SEPHI $=0.67$, and HSF $=37.0\%$. The cross-section profile shows a strong day-night gradient with a temperate transition zone, consistent with an eyeball-like climate pattern.
-
+The ELM Ensemble generates a full $32 \times 64$ climate surface-temperature map in under 100 milliseconds on a standard CPU, effectively bypassing the multi-day bottleneck of GCMs [1]. Overall, the scenario suite demonstrates that the system distinguishes plausibly habitable, marginal, and non-habitable regimes while preserving rapid inference and interpretable diagnostics. For the tidally locked candidate, the cross-section profile shows a strong day-night gradient with a temperate transition zone, consistent with an eyeball-like climate pattern [2].
 
 \begin{figure}[H]
     \centering
@@ -433,6 +367,7 @@ A tidally locked candidate yielded $T_{eq}=272$ K, ESI $=0.944$, SEPHI $=0.67$, 
     \label{fig:esi_dashboard}
 \end{figure}
 
+Figure~\ref{fig:terminator_cross_section} shows the terminator cross-section temperature profile for a tidally locked candidate, revealing the characteristic day-night thermal gradient. Figure~\ref{fig:globe} shows the 3D interactive globe rendering of predicted surface temperatures.
 
 \begin{figure}[H]
     \centering
@@ -446,9 +381,10 @@ A tidally locked candidate yielded $T_{eq}=272$ K, ESI $=0.944$, SEPHI $=0.67$, 
     \centering
     \includegraphics[width=0.8\textwidth]{app-photos/globe.png}
     \caption{3D interactive globe of predicted surface temperature mapped in Plotly.}
+    \label{fig:globe}
 \end{figure}
 
-When rendering tidally locked planets (like Proxima Centauri b), the model correctly produces an "Eyeball" climate state-showing a hot substellar point surrounded by global ice. The CTGAN successfully generated 500,000 synthetic planetary data points, and our physical post-filter ensured that outputs stayed strictly within thermodynamic bounds (e.g., $T_{eq} \in [10, 4000]$ K). 
+When rendering tidally locked planets (like Proxima Centauri~b), the model correctly produces an ``Eyeball'' climate state showing a hot substellar point surrounded by global ice. The CTGAN [8] successfully generated 500,000 synthetic planetary data points, and the physical post-filter ensured that outputs stayed strictly within thermodynamic bounds. Figure~\ref{fig:ctgan_distribution_overlay} shows the distribution overlay comparing real catalog planets and CTGAN-generated synthetic habitable candidates across key physical parameters.
 
 \begin{figure}[H]
     \centering
@@ -457,7 +393,7 @@ When rendering tidally locked planets (like Proxima Centauri b), the model corre
     \label{fig:ctgan_distribution_overlay}
 \end{figure}
 
-Comparisons against precomputed GCM benchmark profiles (e.g., Earth-like aquaplanets and hot rocks) show strong pattern correlation, proving the ELM acts as a viable hypothesis-generating approximation. Furthermore, the Isolation Forest anomaly detection successfully clustered the NASA catalog, identifying outliers and displaying them effectively using UMAP 2D projections.
+Comparisons against precomputed GCM benchmark profiles show strong pattern correlation, proving the ELM acts as a viable hypothesis-generating approximation. The Isolation Forest anomaly detection successfully clustered the NASA catalog [6], identifying outliers and displaying them effectively using UMAP 2D projections. Figure~\ref{fig:umap_projection} shows the UMAP projection with anomaly candidates highlighted.
 
 \begin{figure}[H]
     \centering
@@ -466,20 +402,25 @@ Comparisons against precomputed GCM benchmark profiles (e.g., Earth-like aquapla
     \label{fig:umap_projection}
 \end{figure}
 
-
-
 \newpage
 
 % -------------------------------------------------------------------
-% 7. CONCLUSIONS
+% 8. CONCLUSIONS
 % -------------------------------------------------------------------
 \section{Conclusions}
 
-The Autonomous Exoplanetary Digital Twin successfully demonstrates that fast, data-driven ML models combined with physics guardrails can serve as effective climate surrogates. The app has very good results with generating instantaneous climate approximations and assessing habitability metrics. 
+The Autonomous Exoplanetary Digital Twin successfully demonstrates that fast, data-driven ML models combined with physics guardrails can serve as effective climate surrogates. The ELM ensemble [1] generates instantaneous climate approximations (under 100 ms per full temperature map), achieving a speedup of over five orders of magnitude compared to traditional GCM simulations that require days of computation. The CTGAN-based data augmentation [8] overcomes the severe class imbalance ($\approx 1{:}380$ habitable-to-total ratio) and produces synthetic planets whose physical distributions closely match real observations. Across four representative scenarios, the system correctly distinguishes Earth-like, tidally locked habitable, hot rocky, and anomalous planets, producing physically consistent temperature maps and habitability metrics (ESI [3], SEPHI [5]).
 
-However, as addressed in our critique response, there are known limitations. The ELM ensemble is currently trained on analytically generated data rather than being calibrated directly against full ROCKE-3D outputs, meaning the surrogate currently models simplified radiative-equilibrium physics. Photosynthesis limits, realistic atmospheric escape modeling, and dynamically computed albedos (rather than static slider inputs) represent areas for improvement.
+However, there are known limitations. The ELM ensemble is currently trained on analytically generated data rather than being calibrated directly against full ROCKE-3D outputs, meaning the surrogate currently models simplified radiative-equilibrium physics. Photosynthesis limits, realistic atmospheric escape modeling, and dynamically computed albedos (rather than static slider inputs) represent areas for improvement. Future work will focus on integrating a lightweight GCM (like ExoPlaSim) directly into the fallback cascade and utilizing real GCM temperature maps to train the next iteration of the ELM surrogate.
 
-Future work will focus on integrating a lightweight GCM (like ExoPlaSim) directly into the fallback cascade and utilizing real GCM temperature maps to train the next iteration of the ELM surrogate.
+Figure~\ref{fig:anomaly-analysis} shows an example of the visual analysis output for a catalog anomaly candidate (EPIC~248847494~b), demonstrating how the system flags low-ESI planets with weak ISA coupling and moderate false-positive risk.
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=0.9\textwidth]{app-photos/Zrzut ekranu 2026-03-25 113509.png}
+    \caption{Visual analysis dashboard for the catalog anomaly candidate EPIC~248847494~b, showing low ESI (0.361), equilibrium temperature of 167~K, and 0\% habitable surface fraction.}
+    \label{fig:anomaly-analysis}
+\end{figure}
 
 
 % -------------------------------------------------------------------
@@ -487,12 +428,15 @@ Future work will focus on integrating a lightweight GCM (like ExoPlaSim) directl
 % -------------------------------------------------------------------
 \section*{Literature}
 \begin{enumerate}
-    \item \textbf{Huang, G.-B., Zhu, Q.-Y., Siew, C.-K.}: \textit{Extreme Learning Machine: Theory and Applications}. Neurocomputing, 70(1-3), 489–501 (2006).
+    \item \textbf{Huang, G.-B., Zhu, Q.-Y., Siew, C.-K.}: \textit{Extreme Learning Machine: Theory and Applications}. Neurocomputing, 70(1-3), 489--501 (2006).
     \item \textbf{Kopparapu, R. K., et al.}: \textit{Habitable Zones around Main-Sequence Stars}. The Astrophysical Journal, 765(2), 131 (2013).
-    \item \textbf{Schulze-Makuch, D., et al.}: \textit{A Two-Tiered Approach to Assessing the Habitability of Exoplanets}. Astrobiology, 11(10), 1041–1052 (2011).
+    \item \textbf{Schulze-Makuch, D., et al.}: \textit{A Two-Tiered Approach to Assessing the Habitability of Exoplanets}. Astrobiology, 11(10), 1041--1052 (2011).
     \item \textbf{Chen, J., Kipping, D.}: \textit{Probabilistic Forecasting of the Masses and Radii of Other Worlds}. The Astrophysical Journal, 834(1), 17 (2017).
-    \item \textbf{Rodríguez-Mozos, J. M., Moya, A.}: \textit{Statistical-Likelihood Exo-Planetary Habitability Index (SEPHI)}. MNRAS, 471(4), 4628–4636 (2017).
+    \item \textbf{Rodríguez-Mozos, J. M., Moya, A.}: \textit{Statistical-Likelihood Exo-Planetary Habitability Index (SEPHI)}. MNRAS, 471(4), 4628--4636 (2017).
+    \item \textbf{NASA Exoplanet Science Institute}: \textit{NASA Exoplanet Archive}. \url{https://exoplanetarchive.ipac.caltech.edu/} (Accessed 2026).
+    \item \textbf{Schneider, J., et al.}: \textit{The Extrasolar Planets Encyclopaedia}. \url{https://exoplanet.eu/} (Accessed 2026).
+    \item \textbf{Xu, L., et al.}: \textit{Modeling Tabular Data using Conditional GAN}. NeurIPS (2019).
+    \item \textbf{Robertson, S.}: \textit{The Probabilistic Relevance Framework: BM25 and Beyond}. Foundations and Trends in Information Retrieval, 3(4), 333--389 (2009).
 \end{enumerate}
 
 \end{document}
-
