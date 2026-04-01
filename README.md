@@ -161,6 +161,59 @@ graph TD
 - **Physics guardrails** — Pydantic validators reject any output that violates thermodynamic or astrophysical constraints.
 - **Graceful degradation** — a 5-level fallback cascade (L0 → L4) ensures the app never crashes. See [Graceful degradation levels](#graceful-degradation-levels) for details.
 
+## 🚀 Launch & Usage Guide
+
+Follow these steps to get the **Autonomous Exoplanetary Digital Twin** running on your local machine.
+
+### 1. Prerequisites
+- **Python 3.10+** (3.11 recommended)
+- **Ollama** (for AI features): [Download here](https://ollama.com/download)
+- **NVIDIA/AMD GPU** (Optional but recommended for PINN/CTGAN training)
+
+### 2. Setup Environment
+```bash
+# Clone the repository
+git clone <repo-url>
+cd Hack-4-Sages
+
+# Create and activate virtual environment
+python -m venv .venv
+source .venv/bin/activate  # Linux/macOS
+# .\.venv\Scripts\Activate.ps1 # Windows
+
+# Install dependencies
+pip install -r requirements.txt
+```
+
+### 3. Configure AI Models (Ollama)
+The app uses a dual-model setup for orchestration and scientific interpretation.
+```bash
+# Pull the orchestrator (Dual-LLM mode)
+ollama pull qwen2.5:14b
+
+# Create the domain expert from the included Modelfile
+# This downloads the AstroSage-8B weights automatically
+ollama create astro-agent -f Modelfile.astrosage
+```
+
+### 4. Initialize Physics & ML Models
+Generate the surrogate model weights required for climate predictions:
+```bash
+# Fast setup (ELM only, ~5s, CPU friendly)
+python train_models.py
+
+# Full suite (ELM + CTGAN + PINNFormer, ~1-2h, requires GPU)
+python train_models.py --ctgan --pinn
+```
+
+### 5. Launch the Application
+```bash
+streamlit run app.py
+```
+The browser will open at **`http://localhost:8501`**.
+
+---
+
 ## Runtime Profiles
 
 | Profile | What it needs | What works |
