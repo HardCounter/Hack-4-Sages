@@ -1,21 +1,17 @@
+dataset as a chapter -> no but include dataset somewhere??? XD maybe 1 paragraph somewhere
 
-citations needed reffering to literature where it is used in the text [1] near the akapit where it was used
-
-
-
-reduce description to max 2 pages
-
-the report should focus more on the ai part not the whole app
-
-what elm we used and how we used it
+conclusions write without a chapter number, one chapter is one page
 
 
+decrease the figure to fit on 1 page
 
-Report only about ai we used, we need to show the results, of our ai
+above the table write table, the figure text should be just above the figure
+
+shorten the last slides with a lot of figures
+
+the conclusion is too much, 1 page for conclusion
 
 
-scheme of elm, explain what is elm? 
-
-
-
-
+1 PAGE PER CHAPTER REMOVE DATASET PAGE
+napisac instrukcje jak odpalic lokalnie naszego streamlita
+via teams send zip of docs and presentation and app
