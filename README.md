@@ -173,7 +173,7 @@ Follow these steps to get the **Autonomous Exoplanetary Digital Twin** running o
 ### 2. Setup Environment
 ```bash
 # Clone the repository
-git clone <repo-url>
+git clone https://github.com/HardCounter/Hack-4-Sages/tree/ai-fundamentals
 cd Hack-4-Sages
 
 # Create and activate virtual environment
